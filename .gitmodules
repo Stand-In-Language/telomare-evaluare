@@ -1,0 +1,12 @@
+[submodule "dep/stand-in-language"]
+	path = dep/stand-in-language
+	url = https://github.com/stand-in-language/stand-in-language
+[submodule "dep/reflex-test-host"]
+	path = dep/reflex-test-host
+	url = git@github.com:minimapletinytools/reflex-test-host.git
+[submodule "dep/tinytools-vty"]
+	path = dep/tinytools-vty
+	url = https://github.com/minimapletinytools/tinytools-vty
+[submodule "dep/tinytools"]
+	path = dep/tinytools
+	url = https://github.com/minimapletinytools/tinytools

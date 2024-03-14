@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad
@@ -16,6 +18,12 @@ import qualified Graphics.Vty as V
 import Reflex
 import Reflex.Network
 import Reflex.Vty
+import Debug.Trace (trace, traceShowId)
+import Data.Functor.Identity (Identity)
+import Control.Monad.Except
+
+import qualified Telomare.Parser as TP
+import qualified Telomare.Eval as TE
 
 import Example.CPU
 
@@ -58,6 +66,59 @@ darkTheme = V.Attr {
   , V.attrBackColor = V.Default
   , V.attrURL = V.Default
 }
+
+thisIsIt :: IO ()
+thisIsIt = mainWidget $ (initManager_ :: forall t a m. (HasDisplayRegion t m, Reflex t, MonadHold t m, MonadFix m) => Layout t (Focus t m) a -> m a) $ do
+  getout <- ctrlc
+  tile flex $ box (pure roundedBoxStyle) $ row $ do
+    rec grout flex $ text numClicksText
+        buttonClicked :: Event t () <- tile flex $ textButton def "Count"
+        numClicks <- count buttonClicked
+        let numClicksText = current $ fmap (T.pack . show) numClicks
+    return ()
+  return $ fmap (\_ -> ()) getout
+
+evaluare :: IO ()
+evaluare = mainWidget $ initManager_ $ do
+  let cfg = def
+        { _textInputConfig_initialValue =
+          "Telomare code here"
+        }
+      -- textBox :: Layout t (Focus t m) a
+      textBox = boxTitle (pure roundedBoxStyle) "Text Edit" $
+        multilineTextInput cfg
+      -- btn :: Text -> m (Event t ())
+      btn label = do
+        let cfg' = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
+        buttonClick <- textButtonStatic cfg' label
+        keyPress <- keyCombos $ Set.fromList
+          [ (V.KEnter, [])
+          , (V.KChar ' ', [])
+          ]
+        pure $ leftmost [() <$ buttonClick, () <$ keyPress]
+      -- go :: String -> String
+      -- go str = TP.runTelomareParser TP.parseLongExpr str
+  getout <- ctrlc
+  tile flex $ box (pure roundedBoxStyle) $ row $ do
+    rec
+      grout flex . text $ telomareText
+      -- telomareText :: Behavior t Text
+      telomareText <- grout flex $ col $ do
+        telomareTextInput :: TextInput t <- grout flex $ textBox
+        grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
+        pure . current $ fmap (T.pack
+                              . show
+                              -- . fmap (TE.tagUPTwithIExpr [])
+                              -- . fmap TP.PrettyUPT
+                              . TP.parseSingleExpression
+                              . init
+                              . tail
+                              . show
+                              )
+                              (_textInput_value telomareTextInput)
+        -- pure $ current $ fmap (T.pack . show) (_textInput_value telomareTextInput)
+    pure ()
+  pure $ fmap (\_ -> ()) getout
 
 main :: IO ()
 main = mainWidget $ withCtrlC $ do
@@ -179,7 +240,8 @@ todo t0 = row $ do
       rec let cfg = def
                 { _checkboxConfig_setValue = setVal
                 }
-          value <- tile (fixed 4) $ checkbox cfg $ _todo_done t0
+          -- value :: Dynamic t Bool
+          value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _todo_done t0
           let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
           (fid, (ti, d)) <- tile' flex $ do
             i <- input

@@ -31,6 +31,9 @@ let
     };
     nixGhc945 = (import ./dep/nixpkgs { inherit system; }).haskell.packages.ghc945.override {
       overrides = self: super: commonOverrides self super // {
+
+        telomare = self.callCabal2nix "telomare" dep/stand-in-language {};
+
         hlint = self.callHackageDirect {
           pkg = "hlint";
           ver = "3.5";
