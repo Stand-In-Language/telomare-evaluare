@@ -32,7 +32,7 @@ let
     nixGhc945 = (import ./dep/nixpkgs { inherit system; }).haskell.packages.ghc945.override {
       overrides = self: super: commonOverrides self super // {
 
-        telomare = self.callCabal2nix "telomare" dep/stand-in-language {};
+        telomare = self.callCabal2nix "telomare" (rp.hackGet dep/telomare) {};
 
         hlint = self.callHackageDirect {
           pkg = "hlint";
