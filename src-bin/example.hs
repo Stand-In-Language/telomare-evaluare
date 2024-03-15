@@ -106,11 +106,15 @@ evaluare = mainWidget $ initManager_ $ do
       telomareText <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
         grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
-        pure . current $ fmap (T.pack
-                              . show
-                              -- . fmap (TE.tagUPTwithIExpr [])
-                              -- . fmap TP.PrettyUPT
-                              . TP.parseSingleExpression
+        pure . current $ fmap ( T.pack
+                              -- . drop 5
+                              -- . show
+                              . (\case
+                                    Right str -> str
+                                    Left str -> str)
+                              . fmap (show . TE.tagUPTwithIExpr [])
+                              -- . fmap (show . TP.MultiLineShowUPT)
+                              . TP.runParseLongExpr
                               . init
                               . tail
                               . show
