@@ -98,7 +98,16 @@ evaluare = mainWidget $ initManager_ $ do
         pure $ leftmost [() <$ buttonClick, () <$ keyPress]
       -- go :: String -> String
       -- go str = TP.runTelomareParser TP.parseLongExpr str
-  getout <- ctrlc
+      -- | The ctrl-c keypress event
+      escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
+      escOrCtrlcQuit = do
+        inp <- input
+        return $ fforMaybe inp $ \case
+          V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
+          V.EvKey (V.KEsc) [] -> Just ()
+          _ -> Nothing
+
+  getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
       grout flex . text $ telomareText
@@ -107,17 +116,13 @@ evaluare = mainWidget $ initManager_ $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
         grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
         pure . current $ fmap ( T.pack
-                              -- . drop 5
-                              -- . show
                               . (\case
                                     Right str -> str
                                     Left str -> str)
-                              . fmap (show . TE.tagUPTwithIExpr [])
-                              -- . fmap (show . TP.MultiLineShowUPT)
+                              -- . fmap (show . TE.tagUPTwithIExpr [])
+                              . fmap (show . TP.MultiLineShowUPT)
                               . TP.runParseLongExpr
-                              . init
-                              . tail
-                              . show
+                              . T.unpack
                               )
                               (_textInput_value telomareTextInput)
         -- pure $ current $ fmap (T.pack . show) (_textInput_value telomareTextInput)
