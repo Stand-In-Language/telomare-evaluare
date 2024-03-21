@@ -1,31 +1,31 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-import Control.Applicative
-import Control.Concurrent
-import Control.Monad
-import Control.Monad.Fix
-import Control.Monad.IO.Class
-import Data.Functor
-import Data.Functor.Misc
-import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.Set as Set
-import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Zipper as TZ
-import Data.Time (getCurrentTime)
-import qualified Graphics.Vty as V
-import Reflex
-import Reflex.Network
-import Reflex.Vty
-import Debug.Trace (trace, traceShowId)
-import Data.Functor.Identity (Identity)
-import Control.Monad.Except
+import           Control.Applicative
+import           Control.Concurrent
+import           Control.Monad
+import           Control.Monad.Except
+import           Control.Monad.Fix
+import           Control.Monad.IO.Class
+import           Data.Functor
+import           Data.Functor.Identity  (Identity)
+import           Data.Functor.Misc
+import           Data.Map               (Map)
+import qualified Data.Map               as Map
+import qualified Data.Set               as Set
+import           Data.Text              (Text)
+import qualified Data.Text              as T
+import qualified Data.Text.Zipper       as TZ
+import           Data.Time              (getCurrentTime)
+import           Debug.Trace            (trace, traceShowId)
+import qualified Graphics.Vty           as V
+import           Reflex
+import           Reflex.Network
+import           Reflex.Vty
 
-import qualified Telomare.Parser as TP
-import qualified Telomare.Eval as TE
+import qualified Telomare.Eval          as TE
+import qualified Telomare.Parser        as TP
 
-import Example.CPU
+import           Example.CPU
 
 type VtyExample t m =
   ( MonadFix m
@@ -96,17 +96,13 @@ evaluare = mainWidget $ initManager_ $ do
           , (V.KChar ' ', [])
           ]
         pure $ leftmost [() <$ buttonClick, () <$ keyPress]
-      -- go :: String -> String
-      -- go str = TP.runTelomareParser TP.parseLongExpr str
-      -- | The ctrl-c keypress event
       escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
       escOrCtrlcQuit = do
         inp <- input
-        return $ fforMaybe inp $ \case
+        pure $ fforMaybe inp $ \case
           V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
           V.EvKey (V.KEsc) [] -> Just ()
           _ -> Nothing
-
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
@@ -114,7 +110,7 @@ evaluare = mainWidget $ initManager_ $ do
       -- telomareText :: Behavior t Text
       telomareText <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
-        grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
+        -- grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
         pure . current $ fmap ( T.pack
                               . (\case
                                     Right str -> str
@@ -223,19 +219,19 @@ taskList = col $ do
 
 data Todo = Todo
   { _todo_label :: Text
-  , _todo_done :: Bool
+  , _todo_done  :: Bool
   }
   deriving (Show, Read, Eq, Ord)
 
 data TodoOutput t = TodoOutput
-  { _todoOutput_todo :: Dynamic t Todo
-  , _todoOutput_delete :: Event t ()
-  , _todoOutput_height :: Dynamic t Int
+  { _todoOutput_todo    :: Dynamic t Todo
+  , _todoOutput_delete  :: Event t ()
+  , _todoOutput_height  :: Dynamic t Int
   , _todoOutput_focusId :: FocusId
   }
 
 todo
-  :: (VtyExample t m, Manager t m, MonadHold t m)
+  :: (VtyExample t m, HasLayout t m)
   => Todo
   -> m (TodoOutput t)
 todo t0 = row $ do
@@ -291,7 +287,7 @@ todos todos0 newTodo = do
       let delete = flip Map.singleton Nothing <$> todoDelete
           todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
           insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
-             Nothing -> Map.singleton 0 $ Just $ Todo "" False
+             Nothing     -> Map.singleton 0 $ Just $ Todo "" False
              Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
           updates = leftmost [insert, delete]
           todoDelete = switch . current $
@@ -322,7 +318,7 @@ scrolling = col $ do
   pb <- getPostBuild
   requestFocus $ Refocus_Id fid <$ pb
   grout (fixed 1) $ text $ ffor (_scrollable_scrollPosition out) $ \p -> "Scrolled to " <> case p of
-    ScrollPos_Top -> "top"
+    ScrollPos_Top    -> "top"
     ScrollPos_Bottom -> "bottom"
     ScrollPos_Line n -> "line " <> T.pack (show n)
   e <- performEventAsync $ ffor pb $ \_ cb -> liftIO $ void $ forkIO $ forever $ do
