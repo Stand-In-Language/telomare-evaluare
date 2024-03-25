@@ -22,6 +22,7 @@ import           Reflex
 import           Reflex.Network
 import           Reflex.Vty
 
+import qualified Telomare               as Tel
 import qualified Telomare.Eval          as TE
 import qualified Telomare.Parser        as TP
 
@@ -115,7 +116,7 @@ evaluare = mainWidget $ initManager_ $ do
                               . (\case
                                     Right str -> str
                                     Left str -> str)
-                              -- . fmap (show . TE.tagUPTwithIExpr [])
+                              -- . fmap (\upt -> show . TE.tagUPTwithIExpr [] $ upt)
                               . fmap (show . TP.MultiLineShowUPT)
                               . TP.runParseLongExpr
                               . T.unpack
@@ -217,6 +218,16 @@ taskList = col $ do
       click <- tile (fixed 3) btn
   return ()
 
+data Node = Node
+  { _node_text           :: Text
+  , _node_displaySubExpr :: Bool
+  }
+
+data NodeOutput t = NodeOutput
+  { _nodeOutput_node    :: Dynamic t Node
+  , _nodeOutput_focusId :: FocusId
+  }
+
 data Todo = Todo
   { _todo_label :: Text
   , _todo_done  :: Bool
@@ -229,6 +240,59 @@ data TodoOutput t = TodoOutput
   , _todoOutput_height  :: Dynamic t Int
   , _todoOutput_focusId :: FocusId
   }
+
+node :: (VtyExample t m, HasLayout t m)
+     => Node
+     -> m (NodeOutput t)
+node n0 = row $ do
+  anyChildFocused $ \focused -> do -- focused :: Dynamic t Bool
+    (fid, e) <- tile' flex $ do
+      grout flex . text $ "Hola"
+      expandValue :: Dynamic t Bool
+        <- tile (fixed 4) $ checkbox def $ _node_displaySubExpr n0
+      pure expandValue
+    pure $ NodeOutput
+      { _nodeOutput_node = Node "bla" <$> e
+      , _nodeOutput_focusId = fid
+      }
+
+nodes
+  :: forall t m.
+     ( MonadHold t m
+     , Manager t m
+     , VtyExample t m
+     , Adjustable t m
+     , PostBuild t m
+     )
+  => [Node]
+  -> m (Dynamic t (Map Int (NodeOutput t)))
+nodes nodes0 = do
+  let nodesMap0 = Map.fromList $ zip [0..] nodes0
+  -- rec listOut <- listHoldWithKey nodesMap0 updates $ \k t -> grout (fixed 1) $ do
+  --       no <- node t
+  --       let sel = select selectOnDelete $ Const2 k
+  --       pb <- getPostBuild
+  --       requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ leftmost [pb, sel]
+  --       pure no
+  undefined
+  --     let -- delete :: Int
+  --         delete = flip Map.singleton Nothing <$> todoDelete
+  --         todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
+  --         -- insert :: Int
+  --         -- insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
+  --         --    Nothing     -> Map.singleton 0 $ Just $ Todo "" False
+  --         --    Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
+  --         updates = leftmost [delete]
+  --         todoDelete = switch . current $
+  --           leftmost .  Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
+
+  --         selectOnDelete = fanMap $ (`Map.singleton` ()) <$> attachWithMaybe
+  --           (\m k -> let (before, after) = Map.split k m
+  --                     in  fmap fst $ Map.lookupMax before <|> Map.lookupMin after)
+  --           (current todosMap)
+  --           todoDelete
+  -- return listOut
+
 
 todo
   :: (VtyExample t m, HasLayout t m)
@@ -250,8 +314,7 @@ todo t0 = row $ do
           let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
           (fid, (ti, d)) <- tile' flex $ do
             i <- input
-            v <- textInput $ def
-              { _textInputConfig_initialValue = TZ.fromText $ _todo_label t0 }
+            v <- textInput $ def { _textInputConfig_initialValue = TZ.fromText $ _todo_label t0 }
             let deleteSelf = attachWithMaybe backspaceOnEmpty (current $ _textInput_value v) i
             return (v, deleteSelf)
       return $ TodoOutput
@@ -261,6 +324,7 @@ todo t0 = row $ do
         , _todoOutput_focusId = fid
         }
   where
+    backspaceOnEmpty :: Text -> V.Event -> Maybe ()
     backspaceOnEmpty v = \case
       V.EvKey V.KBS _ | T.null v -> Just ()
       _ -> Nothing
@@ -284,8 +348,10 @@ todos todos0 newTodo = do
         pb <- getPostBuild
         requestFocus $ Refocus_Id (_todoOutput_focusId to) <$ leftmost [pb, sel]
         pure to
-      let delete = flip Map.singleton Nothing <$> todoDelete
+      let delete :: Event t (Map Int (Maybe Todo))
+          delete = flip Map.singleton Nothing <$> todoDelete
           todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
+          insert :: Event t (Map Int (Maybe Todo))
           insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
              Nothing     -> Map.singleton 0 $ Just $ Todo "" False
              Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
