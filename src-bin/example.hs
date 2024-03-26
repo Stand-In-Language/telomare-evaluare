@@ -47,6 +47,7 @@ type Manager t m =
 
 data Example = Example_TextEditor
              | Example_Todo
+             | Example_Node
              | Example_ScrollableTextDisplay
              | Example_ClickButtonsGetEmojis
              | Example_CPUStat
@@ -58,7 +59,7 @@ withCtrlC f = do
   f
   return $ fforMaybe inp $ \case
     V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-    _ -> Nothing
+    _                               -> Nothing
 
 darkTheme :: V.Attr
 darkTheme = V.Attr {
@@ -102,8 +103,8 @@ evaluare = mainWidget $ initManager_ $ do
         inp <- input
         pure $ fforMaybe inp $ \case
           V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-          V.EvKey (V.KEsc) [] -> Just ()
-          _ -> Nothing
+          V.EvKey (V.KEsc) []             -> Just ()
+          _                               -> Nothing
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
@@ -115,7 +116,7 @@ evaluare = mainWidget $ initManager_ $ do
         pure . current $ fmap ( T.pack
                               . (\case
                                     Right str -> str
-                                    Left str -> str)
+                                    Left str  -> str)
                               -- . fmap (\upt -> show . TE.tagUPTwithIExpr [] $ upt)
                               . fmap (show . TP.MultiLineShowUPT)
                               . TP.runParseLongExpr
@@ -138,12 +139,14 @@ main = mainWidget $ withCtrlC $ do
             gf 1 $ text "Esc will bring you back here."
             gf 1 $ text "Ctrl+c to quit."
           a <- t $ textButtonStatic def "Todo List"
+          f <- t $ textButtonStatic def "Nodes"
           b <- t $ textButtonStatic def "Text Editor"
           c <- t $ textButtonStatic def "Scrollable text display"
           d <- t $ textButtonStatic def "Clickable buttons"
           e <- t $ textButtonStatic def "CPU Usage"
           return $ leftmost
             [ Left Example_Todo <$ a
+            , Left Example_Node <$ f
             , Left Example_TextEditor <$ b
             , Left Example_ScrollableTextDisplay <$ c
             , Left Example_ClickButtonsGetEmojis <$ d
@@ -154,10 +157,12 @@ main = mainWidget $ withCtrlC $ do
           i <- input
           return $ fforMaybe i $ \case
             V.EvKey V.KEsc [] -> Just $ Right ()
-            _ -> Nothing
+            _                 -> Nothing
     rec out <- networkHold buttons $ ffor (switch (current out)) $ \case
           Left Example_Todo -> escapable taskList
-          Left Example_TextEditor -> escapable $ localTheme (const (constant darkTheme)) testBoxes
+          Left Example_Node -> escapable nodeList
+          -- Left Example_TextEditor -> escapable $ localTheme (const (constant darkTheme)) testBoxes
+          Left Example_TextEditor -> escapable testBoxes
           Left Example_ScrollableTextDisplay -> escapable scrolling
           Left Example_ClickButtonsGetEmojis -> escapable easyExample
           Left Example_CPUStat -> escapable cpuStats
@@ -191,7 +196,7 @@ easyExample = do
   inp <- input
   return $ fforMaybe inp $ \case
     V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-    _ -> Nothing
+    _                               -> Nothing
   where
     btn label = do
       let cfg = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
@@ -214,17 +219,34 @@ taskList = col $ do
         ]
       btn = textButtonStatic def "Add another task"
   enter <- fmap (const ()) <$> key V.KEnter
-  rec void $ grout flex $ todos todos0 $ enter <> click
+  rec void $ grout flex $ ((todos todos0)) $ enter <> click
       click <- tile (fixed 3) btn
-  return ()
+  pure ()
+
+nodeList
+  :: (VtyExample t m, Manager t m, MonadHold t m, Adjustable t m, PostBuild t m)
+  => m ()
+nodeList = col $ do
+  let nodes0 =
+        [ Node "PairUP" True
+        , Node "  IntUP 0" False
+        , Node "  IntUP 1" False
+        ]
+      -- btn = textButtonStatic def "Add another task"
+  enter <- fmap (const ()) <$> key V.KEnter
+  rec void $ grout flex $ nodes nodes0 --  $ enter <> click
+      -- click <- tile (fixed 3) btn
+  pure ()
+
 
 data Node = Node
-  { _node_text           :: Text
-  , _node_displaySubExpr :: Bool
+  { _node_label   :: Text
+  , _node_expand :: Bool
   }
 
 data NodeOutput t = NodeOutput
   { _nodeOutput_node    :: Dynamic t Node
+  , _nodeOutput_expand  :: Event t ()
   , _nodeOutput_focusId :: FocusId
   }
 
@@ -237,7 +259,7 @@ data Todo = Todo
 data TodoOutput t = TodoOutput
   { _todoOutput_todo    :: Dynamic t Todo
   , _todoOutput_delete  :: Event t ()
-  , _todoOutput_height  :: Dynamic t Int
+  -- , _todoOutput_height  :: Dynamic t Int
   , _todoOutput_focusId :: FocusId
   }
 
@@ -245,16 +267,30 @@ node :: (VtyExample t m, HasLayout t m)
      => Node
      -> m (NodeOutput t)
 node n0 = row $ do
+  let toggleKeys = Set.fromList
+        [ (V.KChar ' ', [V.MCtrl])
+        , (V.KChar '@', [V.MCtrl])
+        ]
   anyChildFocused $ \focused -> do -- focused :: Dynamic t Bool
-    (fid, e) <- tile' flex $ do
-      grout flex . text $ "Hola"
-      expandValue :: Dynamic t Bool
-        <- tile (fixed 4) $ checkbox def $ _node_displaySubExpr n0
-      pure expandValue
-    pure $ NodeOutput
-      { _nodeOutput_node = Node "bla" <$> e
-      , _nodeOutput_focusId = fid
-      }
+    toggleE <- keyCombos toggleKeys
+    filterKeys (flip Set.notMember $ Set.insert (V.KChar '\t', []) toggleKeys) $ do
+      rec
+          -- let cfg = def
+          --       { _checkboxConfig_setValue = setVal
+          --       }
+          -- -- value :: Dynamic t Bool
+          -- value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _node_expand n0
+          -- let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
+          (fid, e) <- tile' flex $ do
+            grout flex . text . pure . _node_label $ n0
+            expandValue :: Dynamic t Bool
+              <- tile (fixed 4) $ checkbox def $ _node_expand n0
+            pure expandValue
+      pure $ NodeOutput
+        { _nodeOutput_node = Node (_node_label n0) <$> e
+        , _nodeOutput_expand = updated $ (\_ -> ()) <$> e
+        , _nodeOutput_focusId = fid
+        }
 
 nodes
   :: forall t m.
@@ -268,30 +304,60 @@ nodes
   -> m (Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
   let nodesMap0 = Map.fromList $ zip [0..] nodes0
-  -- rec listOut <- listHoldWithKey nodesMap0 updates $ \k t -> grout (fixed 1) $ do
-  --       no <- node t
-  --       let sel = select selectOnDelete $ Const2 k
-  --       pb <- getPostBuild
-  --       requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ leftmost [pb, sel]
-  --       pure no
-  undefined
-  --     let -- delete :: Int
-  --         delete = flip Map.singleton Nothing <$> todoDelete
-  --         todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
-  --         -- insert :: Int
-  --         -- insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
-  --         --    Nothing     -> Map.singleton 0 $ Just $ Todo "" False
-  --         --    Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
-  --         updates = leftmost [delete]
-  --         todoDelete = switch . current $
-  --           leftmost .  Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
+  rec listOut  :: Dynamic t (Map Int (NodeOutput t))
+        <- listHoldWithKey nodesMap0 expand $ \k t -> grout (fixed 1) $ do
+          no <- node t
+          pb <- getPostBuild
+          requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+          pure no
+      let expand :: Event t (Map Int (Maybe Node))
+          expand = flip Map.singleton Nothing <$> nodeExpand
+          -- nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
+          nodeExpand :: Event t Int
+          nodeExpand = switch . current $
+            leftmost .  Map.elems . Map.mapWithKey (\k -> (k <$) . _nodeOutput_expand) <$> listOut
+  pure listOut
 
-  --         selectOnDelete = fanMap $ (`Map.singleton` ()) <$> attachWithMaybe
-  --           (\m k -> let (before, after) = Map.split k m
-  --                     in  fmap fst $ Map.lookupMax before <|> Map.lookupMin after)
-  --           (current todosMap)
-  --           todoDelete
-  -- return listOut
+todos
+  :: forall t m.
+     ( MonadHold t m
+     , Manager t m
+     , VtyExample t m
+     , Adjustable t m
+     , PostBuild t m
+     )
+  => [Todo]
+  -> Event t ()
+  -> m (Dynamic t (Map Int (TodoOutput t)))
+todos todos0 newTodo = do
+  let todosMap0 :: Map Int Todo
+      todosMap0 = Map.fromList $ zip [0..] todos0
+  rec listOut :: Dynamic t (Map Int (TodoOutput t))
+        <- listHoldWithKey todosMap0 updates $ \k t -> grout (fixed 1) $ do
+          to <- todo t
+          let sel = select selectOnDelete $ Const2 k
+          pb <- getPostBuild
+          requestFocus $ Refocus_Id (_todoOutput_focusId to) <$ leftmost [pb, sel]
+          pure to
+      let delete :: Event t (Map Int (Maybe Todo))
+          delete = flip Map.singleton Nothing <$> todoDelete
+          todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
+          insert :: Event t (Map Int (Maybe Todo))
+          insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
+             Nothing     -> Map.singleton 0 $ Just $ Todo "" False
+             Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
+          updates :: Event t (Map Int (Maybe Todo))
+          updates = leftmost [insert, delete]
+          todoDelete :: Event t Int
+          todoDelete = switch . current $
+            leftmost . Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
+
+          selectOnDelete = fanMap $ (`Map.singleton` ()) <$> attachWithMaybe
+            (\m k -> let (before, after) = Map.split k m
+                      in  fmap fst $ Map.lookupMax before <|> Map.lookupMin after)
+            (current todosMap)
+            todoDelete
+  pure listOut
 
 
 todo
@@ -314,57 +380,22 @@ todo t0 = row $ do
           let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
           (fid, (ti, d)) <- tile' flex $ do
             i <- input
-            v <- textInput $ def { _textInputConfig_initialValue = TZ.fromText $ _todo_label t0 }
-            let deleteSelf = attachWithMaybe backspaceOnEmpty (current $ _textInput_value v) i
+            v :: TextInput t <- textInput $
+              def { _textInputConfig_initialValue = TZ.fromText $ _todo_label t0 }
+            let deleteSelf :: Event t ()
+                deleteSelf = attachWithMaybe backspaceOnEmpty (current $ _textInput_value v) i
             return (v, deleteSelf)
       return $ TodoOutput
         { _todoOutput_todo = Todo <$> _textInput_value ti <*> value
         , _todoOutput_delete = d
-        , _todoOutput_height = _textInput_lines ti
+        -- , _todoOutput_height = _textInput_lines ti
         , _todoOutput_focusId = fid
         }
   where
     backspaceOnEmpty :: Text -> V.Event -> Maybe ()
     backspaceOnEmpty v = \case
       V.EvKey V.KBS _ | T.null v -> Just ()
-      _ -> Nothing
-
-todos
-  :: forall t m.
-     ( MonadHold t m
-     , Manager t m
-     , VtyExample t m
-     , Adjustable t m
-     , PostBuild t m
-     )
-  => [Todo]
-  -> Event t ()
-  -> m (Dynamic t (Map Int (TodoOutput t)))
-todos todos0 newTodo = do
-  let todosMap0 = Map.fromList $ zip [0..] todos0
-  rec listOut <- listHoldWithKey todosMap0 updates $ \k t -> grout (fixed 1) $ do
-        to <- todo t
-        let sel = select selectOnDelete $ Const2 k
-        pb <- getPostBuild
-        requestFocus $ Refocus_Id (_todoOutput_focusId to) <$ leftmost [pb, sel]
-        pure to
-      let delete :: Event t (Map Int (Maybe Todo))
-          delete = flip Map.singleton Nothing <$> todoDelete
-          todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
-          insert :: Event t (Map Int (Maybe Todo))
-          insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
-             Nothing     -> Map.singleton 0 $ Just $ Todo "" False
-             Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
-          updates = leftmost [insert, delete]
-          todoDelete = switch . current $
-            leftmost .  Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
-
-          selectOnDelete = fanMap $ (`Map.singleton` ()) <$> attachWithMaybe
-            (\m k -> let (before, after) = Map.split k m
-                      in  fmap fst $ Map.lookupMax before <|> Map.lookupMin after)
-            (current todosMap)
-            todoDelete
-  return listOut
+      _                          -> Nothing
 
 -- * Scrollable text example
 
