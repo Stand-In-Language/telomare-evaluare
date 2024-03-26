@@ -219,7 +219,7 @@ taskList = col $ do
         ]
       btn = textButtonStatic def "Add another task"
   enter <- fmap (const ()) <$> key V.KEnter
-  rec void $ grout flex $ ((todos todos0)) $ enter <> click
+  rec void . grout flex . todos todos0 $ enter <> click
       click <- tile (fixed 3) btn
   pure ()
 
@@ -240,7 +240,7 @@ nodeList = col $ do
 
 
 data Node = Node
-  { _node_label   :: Text
+  { _node_label  :: Text
   , _node_expand :: Bool
   }
 
@@ -267,30 +267,23 @@ node :: (VtyExample t m, HasLayout t m)
      => Node
      -> m (NodeOutput t)
 node n0 = row $ do
-  let toggleKeys = Set.fromList
-        [ (V.KChar ' ', [V.MCtrl])
-        , (V.KChar '@', [V.MCtrl])
-        ]
   anyChildFocused $ \focused -> do -- focused :: Dynamic t Bool
-    toggleE <- keyCombos toggleKeys
-    filterKeys (flip Set.notMember $ Set.insert (V.KChar '\t', []) toggleKeys) $ do
-      rec
-          -- let cfg = def
-          --       { _checkboxConfig_setValue = setVal
-          --       }
-          -- -- value :: Dynamic t Bool
-          -- value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _node_expand n0
-          -- let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
-          (fid, e) <- tile' flex $ do
-            grout flex . text . pure . _node_label $ n0
-            expandValue :: Dynamic t Bool
-              <- tile (fixed 4) $ checkbox def $ _node_expand n0
-            pure expandValue
-      pure $ NodeOutput
-        { _nodeOutput_node = Node (_node_label n0) <$> e
-        , _nodeOutput_expand = updated $ (\_ -> ()) <$> e
-        , _nodeOutput_focusId = fid
-        }
+
+    -- rec let cfg = def
+    --       { _checkboxConfig_setValue = updated value
+    --       }
+    -- value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _todo_done t0
+    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+    (fid, _) <- tile' flex $ do
+      grout flex . text . pure . _node_label $ n0
+      -- expandValue :: Dynamic t Bool
+      --   <- tile (fixed 4) . checkbox def . _node_expand $ n0
+      pure ()
+    pure $ NodeOutput
+      { _nodeOutput_node = Node (_node_label n0) <$> value
+      , _nodeOutput_expand = (\_ -> ()) <$> updated value
+      , _nodeOutput_focusId = fid
+      }
 
 nodes
   :: forall t m.
@@ -341,6 +334,7 @@ todos todos0 newTodo = do
           pure to
       let delete :: Event t (Map Int (Maybe Todo))
           delete = flip Map.singleton Nothing <$> todoDelete
+          todosMap :: Dynamic t (Map Int Todo)
           todosMap = joinDynThroughMap $ fmap _todoOutput_todo <$> listOut
           insert :: Event t (Map Int (Maybe Todo))
           insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
@@ -360,10 +354,10 @@ todos todos0 newTodo = do
   pure listOut
 
 
-todo
-  :: (VtyExample t m, HasLayout t m)
-  => Todo
-  -> m (TodoOutput t)
+todo :: forall t m.
+        (VtyExample t m, HasLayout t m)
+     => Todo
+     -> m (TodoOutput t)
 todo t0 = row $ do
   let toggleKeys = Set.fromList
         [ (V.KChar ' ', [V.MCtrl])
@@ -375,11 +369,11 @@ todo t0 = row $ do
       rec let cfg = def
                 { _checkboxConfig_setValue = setVal
                 }
-          -- value :: Dynamic t Bool
           value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _todo_done t0
-          let setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
+          let setVal :: Event t Bool
+              setVal = attachWith (\v _ -> not v) (current value) $ gate (current focused) toggleE
           (fid, (ti, d)) <- tile' flex $ do
-            i <- input
+            i :: Event t VtyEvent <- input
             v :: TextInput t <- textInput $
               def { _textInputConfig_initialValue = TZ.fromText $ _todo_label t0 }
             let deleteSelf :: Event t ()
