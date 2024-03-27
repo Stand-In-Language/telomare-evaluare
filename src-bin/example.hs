@@ -209,7 +209,12 @@ easyExample = do
 
 -- * Task list example
 taskList
-  :: (VtyExample t m, Manager t m, MonadHold t m, Adjustable t m, PostBuild t m)
+  :: ( VtyExample t m
+     , Manager t m
+     , MonadHold t m
+     , Adjustable t m
+     , PostBuild t m
+     )
   => m ()
 taskList = col $ do
   let todos0 =
@@ -223,19 +228,21 @@ taskList = col $ do
       click <- tile (fixed 3) btn
   pure ()
 
-nodeList
-  :: (VtyExample t m, Manager t m, MonadHold t m, Adjustable t m, PostBuild t m)
-  => m ()
+nodeList :: ( VtyExample t m
+            , Manager t m
+            , MonadHold t m
+            , Adjustable t m
+            , PostBuild t m
+            )
+         => m ()
 nodeList = col $ do
   let nodes0 =
         [ Node "PairUP" True
         , Node "  IntUP 0" False
         , Node "  IntUP 1" False
         ]
-      -- btn = textButtonStatic def "Add another task"
-  enter <- fmap (const ()) <$> key V.KEnter
-  rec void $ grout flex $ nodes nodes0 --  $ enter <> click
-      -- click <- tile (fixed 3) btn
+  -- void $ grout flex $ nodes nodes0
+  grout flex $ nodes nodes0
   pure ()
 
 
@@ -259,7 +266,6 @@ data Todo = Todo
 data TodoOutput t = TodoOutput
   { _todoOutput_todo    :: Dynamic t Todo
   , _todoOutput_delete  :: Event t ()
-  -- , _todoOutput_height  :: Dynamic t Int
   , _todoOutput_focusId :: FocusId
   }
 
@@ -267,18 +273,11 @@ node :: (VtyExample t m, HasLayout t m)
      => Node
      -> m (NodeOutput t)
 node n0 = row $ do
-  anyChildFocused $ \focused -> do -- focused :: Dynamic t Bool
-
-    -- rec let cfg = def
-    --       { _checkboxConfig_setValue = updated value
-    --       }
-    -- value :: Dynamic t Bool <- tile (fixed 4) $ checkbox cfg $ _todo_done t0
-    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
-    (fid, _) <- tile' flex $ do
+  anyChildFocused $ \(focused :: Dynamic t Bool) -> do
+    (fid, _) <- tile' (fixed . pure . (+1) . T.length . _node_label $ n0) $ do
       grout flex . text . pure . _node_label $ n0
-      -- expandValue :: Dynamic t Bool
-      --   <- tile (fixed 4) . checkbox def . _node_expand $ n0
       pure ()
+    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) <$> value
       , _nodeOutput_expand = (\_ -> ()) <$> updated value
@@ -328,8 +327,9 @@ todos todos0 newTodo = do
   rec listOut :: Dynamic t (Map Int (TodoOutput t))
         <- listHoldWithKey todosMap0 updates $ \k t -> grout (fixed 1) $ do
           to <- todo t
-          let sel = select selectOnDelete $ Const2 k
-          pb <- getPostBuild
+          let sel :: Event t ()
+              sel = select selectOnDelete $ Const2 k
+          pb :: Event t () <- getPostBuild
           requestFocus $ Refocus_Id (_todoOutput_focusId to) <$ leftmost [pb, sel]
           pure to
       let delete :: Event t (Map Int (Maybe Todo))
@@ -382,7 +382,6 @@ todo t0 = row $ do
       return $ TodoOutput
         { _todoOutput_todo = Todo <$> _textInput_value ti <*> value
         , _todoOutput_delete = d
-        -- , _todoOutput_height = _textInput_lines ti
         , _todoOutput_focusId = fid
         }
   where
