@@ -72,12 +72,14 @@ darkTheme = V.Attr {
 thisIsIt :: IO ()
 thisIsIt = mainWidget $ (initManager_ :: forall t a m. (HasDisplayRegion t m, Reflex t, MonadHold t m, MonadFix m) => Layout t (Focus t m) a -> m a) $ do
   getout <- ctrlc
-  tile flex $ box (pure roundedBoxStyle) $ row $ do
-    rec grout flex $ text numClicksText
-        buttonClicked :: Event t () <- tile flex $ textButton def "Count"
-        numClicks <- count buttonClicked
-        let numClicksText = current $ fmap (T.pack . show) numClicks
-    return ()
+  tile flex $ box (pure roundedBoxStyle) $ do
+    row . grout flex . text $ "Hola"
+    row $ do
+      rec grout flex $ text numClicksText
+          buttonClicked :: Event t () <- tile flex $ textButton def "Count"
+          numClicks <- count buttonClicked
+          let numClicksText = current $ fmap (T.pack . show) numClicks
+      pure ()
   return $ fmap (\_ -> ()) getout
 
 evaluare :: IO ()
@@ -237,17 +239,22 @@ nodeList :: ( VtyExample t m
          => m ()
 nodeList = col $ do
   let nodes0 =
-        [ Node "PairUP" True
-        , Node "  IntUP 0" False
-        , Node "  IntUP 1" False
+        [ Node "PairUP" "IExpr Foo" False
+        , Node "  IntUP 0" "IExpr Bar" True
+        , Node "  IntUP 1" "IExpr Baz" False
         ]
   -- void $ grout flex $ nodes nodes0
   grout flex $ nodes nodes0
+  -- grout flex $ do
+  --   row . grout flex . text $ "Hola"
+  --   row . grout flex . text $ "Hola2"
+  --   row . grout flex . text $ "Hola3"
   pure ()
 
 
 data Node = Node
   { _node_label  :: Text
+  , _node_eval   :: Text
   , _node_expand :: Bool
   }
 
@@ -272,24 +279,35 @@ data TodoOutput t = TodoOutput
 node :: (VtyExample t m, HasLayout t m)
      => Node
      -> m (NodeOutput t)
-node n0 = row $ do
-  anyChildFocused $ \(focused :: Dynamic t Bool) -> do
-    rec (fid, _) <- tile' (fixed . pure . (+1) . T.length . _node_label $ n0) $ do
-          grout flex . text . pure . _node_label $ n0
-          if _node_expand n0
-            then grout flex . text $ "Foo"
-            else pure ()
-          pure ()
-        value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
-        value' :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
-
-
-
+node n0 = do
+  res <- row $ do
+    (fid, _) <- tile' ( fixed
+                      . pure
+                      . (+1)
+                      . T.length
+                      . _node_label
+                      $ n0
+                      ) $ do
+      grout flex . text . pure . _node_label $ n0
+      pure ()
+    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
     pure $ NodeOutput
-      { _nodeOutput_node = Node (_node_label n0) <$> value
+      { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
       , _nodeOutput_expand = (\_ -> ()) <$> updated value
       , _nodeOutput_focusId = fid
       }
+  -- row . tile flex . box (pure roundedBoxStyle) . text $ "BLAAAA"
+  -- row . grout flex . box (pure roundedBoxStyle) . text $ "BLAAAA"
+
+  if _node_expand n0
+    then row
+       . tile flex
+       . grout flex
+       -- . box (pure roundedBoxStyle)
+       . text
+       $ "  -- Zero"
+    else pure ()
+  pure res
 
 nodes :: forall t m.
          ( MonadHold t m
@@ -303,11 +321,15 @@ nodes :: forall t m.
 nodes nodes0 = do
   let nodesMap0 = Map.fromList $ zip [0..] nodes0
   rec listOut  :: Dynamic t (Map Int (NodeOutput t))
-        <- listHoldWithKey nodesMap0 expand $ \k t -> grout (fixed 1) $ do
-          no <- node t
-          pb <- getPostBuild
-          requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-          pure no
+        <- listHoldWithKey nodesMap0 expand $
+        -- <- listHoldWithKey nodesMap0 (updated listOut) $
+             \(k :: Int) (n :: Node) ->
+               let h = if _node_expand n then 2 else 1
+               in grout (fixed h) $ do
+                 no <- node n
+                 pb <- getPostBuild
+                 requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+                 pure no
       let expand :: Event t (Map Int (Maybe Node))
           expand = flip Map.singleton Nothing <$> nodeExpand
           -- nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
