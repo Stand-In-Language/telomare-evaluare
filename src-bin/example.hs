@@ -224,7 +224,7 @@ taskList = col $ do
         ]
       btn = textButtonStatic def "Add another task"
   enter <- fmap (const ()) <$> key V.KEnter
-  rec void . grout flex . todos todos0 $ enter <> click
+  rec grout flex . todos todos0 $ enter <> click
       click <- tile (fixed 3) btn
   pure ()
 
@@ -274,26 +274,32 @@ node :: (VtyExample t m, HasLayout t m)
      -> m (NodeOutput t)
 node n0 = row $ do
   anyChildFocused $ \(focused :: Dynamic t Bool) -> do
-    (fid, _) <- tile' (fixed . pure . (+1) . T.length . _node_label $ n0) $ do
-      grout flex . text . pure . _node_label $ n0
-      pure ()
-    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+    rec (fid, _) <- tile' (fixed . pure . (+1) . T.length . _node_label $ n0) $ do
+          grout flex . text . pure . _node_label $ n0
+          if _node_expand n0
+            then grout flex . text $ "Foo"
+            else pure ()
+          pure ()
+        value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+        value' :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+
+
+
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) <$> value
       , _nodeOutput_expand = (\_ -> ()) <$> updated value
       , _nodeOutput_focusId = fid
       }
 
-nodes
-  :: forall t m.
-     ( MonadHold t m
-     , Manager t m
-     , VtyExample t m
-     , Adjustable t m
-     , PostBuild t m
-     )
-  => [Node]
-  -> m (Dynamic t (Map Int (NodeOutput t)))
+nodes :: forall t m.
+         ( MonadHold t m
+         , Manager t m
+         , VtyExample t m
+         , Adjustable t m
+         , PostBuild t m
+         )
+      => [Node]
+      -> m (Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
   let nodesMap0 = Map.fromList $ zip [0..] nodes0
   rec listOut  :: Dynamic t (Map Int (NodeOutput t))
@@ -363,8 +369,8 @@ todo t0 = row $ do
         [ (V.KChar ' ', [V.MCtrl])
         , (V.KChar '@', [V.MCtrl])
         ]
-  anyChildFocused $ \focused -> do
-    toggleE <- keyCombos toggleKeys
+  anyChildFocused $ \(focused :: Dynamic t Bool) -> do
+    toggleE :: Event t KeyCombo <- keyCombos toggleKeys
     filterKeys (flip Set.notMember $ Set.insert (V.KChar '\t', []) toggleKeys) $ do
       rec let cfg = def
                 { _checkboxConfig_setValue = setVal
