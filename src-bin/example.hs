@@ -257,6 +257,7 @@ data Node = Node
   , _node_eval   :: Text
   , _node_expand :: Bool
   }
+  deriving (Show, Eq)
 
 data NodeOutput t = NodeOutput
   { _nodeOutput_node    :: Dynamic t Node
@@ -296,9 +297,6 @@ node n0 = do
       , _nodeOutput_expand = (\_ -> ()) <$> updated value
       , _nodeOutput_focusId = fid
       }
-  -- row . tile flex . box (pure roundedBoxStyle) . text $ "BLAAAA"
-  -- row . grout flex . box (pure roundedBoxStyle) . text $ "BLAAAA"
-
   if _node_expand n0
     then row
        . tile flex
@@ -319,14 +317,18 @@ nodes :: forall t m.
       => [Node]
       -> m (Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
-  let nodesMap0 = Map.fromList $ zip [0..] nodes0
+  let nodesMap0 :: Dynamic t (Map Int Node)
+      nodesMap0 = constDyn . Map.fromList . zip [0..] $ nodes0
   rec listOut  :: Dynamic t (Map Int (NodeOutput t))
-        <- listHoldWithKey nodesMap0 expand $
-        -- <- listHoldWithKey nodesMap0 (updated listOut) $
-             \(k :: Int) (n :: Node) ->
-               let h = if _node_expand n then 2 else 1
-               in grout (fixed h) $ do
-                 no <- node n
+        <- list nodesMap0 $
+             \(dn :: Dynamic t Node) ->
+               let n :: m Node
+                   n = sample . current $ dn
+                   -- aux :: Dynamic t (m (NodeOutput t))
+                   -- aux :: Dynamic t (m (NodeOutput t))
+                   -- aux = node <$> dn
+               in grout (fixed 2) $ do
+                 no <- n >>= node
                  pb <- getPostBuild
                  requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
                  pure no
