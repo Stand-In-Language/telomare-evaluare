@@ -315,29 +315,71 @@ nodes :: forall t m.
          , PostBuild t m
          )
       => [Node]
-      -> m (Dynamic t (Map Int (NodeOutput t)))
+      -- -> m (Dynamic t (Map Int (NodeOutput t)))
+      -> m (Dynamic t [NodeOutput t])
 nodes nodes0 = do
   let nodesMap0 :: Dynamic t (Map Int Node)
       nodesMap0 = constDyn . Map.fromList . zip [0..] $ nodes0
-  rec listOut  :: Dynamic t (Map Int (NodeOutput t))
-        <- list nodesMap0 $
-             \(dn :: Dynamic t Node) ->
-               let n :: m Node
-                   n = sample . current $ dn
-                   -- aux :: Dynamic t (m (NodeOutput t))
-                   -- aux :: Dynamic t (m (NodeOutput t))
-                   -- aux = node <$> dn
-               in grout (fixed 2) $ do
-                 no <- n >>= node
-                 pb <- getPostBuild
-                 requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-                 pure no
-      let expand :: Event t (Map Int (Maybe Node))
-          expand = flip Map.singleton Nothing <$> nodeExpand
-          -- nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
-          nodeExpand :: Event t Int
-          nodeExpand = switch . current $
-            leftmost .  Map.elems . Map.mapWithKey (\k -> (k <$) . _nodeOutput_expand) <$> listOut
+      nodesMap :: Map Int Node
+      nodesMap = Map.fromList . zip [0..] $ nodes0
+  rec listOut :: Dynamic t [NodeOutput t]
+        <- simpleList undefined (\(dn :: Dynamic t Node) -> grout (fixed 2) $ do
+             n <- dn
+             -- let dno = node <$> dn
+             -- pb <- getPostBuild
+             -- requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+             -- pure no
+             undefined)
+
+
+              -- listHoldWithKey
+           --   Map Int Node
+           --   -> Event t (Map Int (Maybe Node))
+           --   -> (Int -> Node -> m (NodeOutput t))
+           --   -> m (Dynamic t (Map Int (NodeOUtput t)))
+        -- <- listHoldWithKey nodesMap (updated listOut) $ \k n -> grout (fixed 2) $ do
+        --   no <- node n
+        --   pb <- getPostBuild
+        --   requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+        --   pure no
+
+        -- listWithKey :: Ord k =>
+        --     Dynamic (Map Int (NodeOutput t )) -> (k -> Dynamic v -> m        a ) -> m (Dynamic (Map k a))
+        -- <- listWithKey nodeMapDyn \k (dn :: Dynamic (NodeOutput t)) -> do
+        --      grout (fixed 2) $ do
+        --        no <- n >>= node
+        --        pb <- getPostBuild
+        --        requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+        --        pure no
+        -- <- list nodesMap0 $
+        --      \(dn :: Dynamic t Node) ->
+        --        let n :: m Node
+        --            n = sample . current $ dn
+        --            -- aux :: Dynamic t (m (NodeOutput t))
+        --            -- aux :: Dynamic t (m (NodeOutput t))
+        --            -- aux = node <$> dn
+        --        in grout (fixed 2) $ do
+        --          no <- n >>= node
+        --          pb <- getPostBuild
+        --          requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
+        --          pure no
+      -- let expand :: Event t (Map Int (Maybe Node))
+      --     expand = (\(i, expandBool) -> Map.singleton i (Just (Map.lookup )))
+      --          <$> nodeExpand
+      --     -- nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
+      --     -- holdDyn :: (Map Int Node) -> Event (Map Int Node) -> m (Dynamic (Map Int Node))
+      --     -- nodeMapDyn = holdDyn nodesMap (nodeExpand )
+      --     -- nodeExpand :: Event t (Int, Bool)
+      --     -- nodeExpand = switch . current $
+      --     --     leftmost
+      --     --   . Map.elems
+      --     --   . Map.mapWithKey (\k -> (k,) <$> _nodeOutput_expand)
+      --     --   <$> listOut
+      --     nodeExpand :: Event t (Int, Bool)
+      --     nodeExpand = switch . current $
+      --         leftmost
+      --       . map (\k -> (k,) <$> _nodeOutput_expand)
+      --       <$> listOut
   pure listOut
 
 todos
@@ -375,7 +417,7 @@ todos todos0 newTodo = do
           todoDelete :: Event t Int
           todoDelete = switch . current $
             leftmost . Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
-
+          selectOnDelete :: EventSelector t (Const2 Int ())
           selectOnDelete = fanMap $ (`Map.singleton` ()) <$> attachWithMaybe
             (\m k -> let (before, after) = Map.split k m
                       in  fmap fst $ Map.lookupMax before <|> Map.lookupMin after)
