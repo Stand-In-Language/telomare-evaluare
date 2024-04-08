@@ -261,7 +261,8 @@ data Node = Node
 
 data NodeOutput t = NodeOutput
   { _nodeOutput_node    :: Dynamic t Node
-  , _nodeOutput_expand  :: Event t ()
+  -- , _nodeOutput_expand  :: Event t ()
+  , _nodeOutput_expand  :: Event t Bool
   , _nodeOutput_focusId :: FocusId
   }
 
@@ -277,7 +278,7 @@ data TodoOutput t = TodoOutput
   , _todoOutput_focusId :: FocusId
   }
 
-node :: (VtyExample t m, HasLayout t m)
+node :: forall t m. (VtyExample t m, HasLayout t m)
      => Node
      -> m (NodeOutput t)
 node n0 = do
@@ -294,17 +295,21 @@ node n0 = do
     value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
-      , _nodeOutput_expand = (\_ -> ()) <$> updated value
+      -- , _nodeOutput_expand = (\_ -> ()) <$> updated value
+      , _nodeOutput_expand = updated value
       , _nodeOutput_focusId = fid
       }
-  if _node_expand n0
-    then row
-       . tile flex
-       . grout flex
-       -- . box (pure roundedBoxStyle)
-       . text
-       $ "  -- Zero"
-    else pure ()
+  -- nodeDyn :: Dynamic t Bool <- holdDyn (_node_expand n0) (_nodeOutput_expand res)
+  expandTextDyn :: Dynamic t Text
+    <- fmap (\b -> if b then "  -- Zero" else "") <$>
+         holdDyn (_node_expand n0) (_nodeOutput_expand res)
+  row $
+     tile flex
+   . grout flex
+   -- . box (pure roundedBoxStyle)
+   . text
+   . current
+   $ expandTextDyn
   pure res
 
 nodes :: forall t m.
@@ -315,72 +320,16 @@ nodes :: forall t m.
          , PostBuild t m
          )
       => [Node]
-      -- -> m (Dynamic t (Map Int (NodeOutput t)))
       -> m (Dynamic t [NodeOutput t])
 nodes nodes0 = do
-  let nodesMap0 :: Dynamic t (Map Int Node)
-      nodesMap0 = constDyn . Map.fromList . zip [0..] $ nodes0
-      nodesMap :: Map Int Node
-      nodesMap = Map.fromList . zip [0..] $ nodes0
-  rec listOut :: Dynamic t [NodeOutput t]
-        <- simpleList undefined (\(dn :: Dynamic t Node) -> grout (fixed 2) $ do
-             n <- dn
-             -- let dno = node <$> dn
-             -- pb <- getPostBuild
-             -- requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-             -- pure no
-             undefined)
-
-
-              -- listHoldWithKey
-           --   Map Int Node
-           --   -> Event t (Map Int (Maybe Node))
-           --   -> (Int -> Node -> m (NodeOutput t))
-           --   -> m (Dynamic t (Map Int (NodeOUtput t)))
-        -- <- listHoldWithKey nodesMap (updated listOut) $ \k n -> grout (fixed 2) $ do
-        --   no <- node n
-        --   pb <- getPostBuild
-        --   requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-        --   pure no
-
-        -- listWithKey :: Ord k =>
-        --     Dynamic (Map Int (NodeOutput t )) -> (k -> Dynamic v -> m        a ) -> m (Dynamic (Map k a))
-        -- <- listWithKey nodeMapDyn \k (dn :: Dynamic (NodeOutput t)) -> do
-        --      grout (fixed 2) $ do
-        --        no <- n >>= node
-        --        pb <- getPostBuild
-        --        requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-        --        pure no
-        -- <- list nodesMap0 $
-        --      \(dn :: Dynamic t Node) ->
-        --        let n :: m Node
-        --            n = sample . current $ dn
-        --            -- aux :: Dynamic t (m (NodeOutput t))
-        --            -- aux :: Dynamic t (m (NodeOutput t))
-        --            -- aux = node <$> dn
-        --        in grout (fixed 2) $ do
-        --          no <- n >>= node
-        --          pb <- getPostBuild
-        --          requestFocus $ Refocus_Id (_nodeOutput_focusId no) <$ pb
-        --          pure no
-      -- let expand :: Event t (Map Int (Maybe Node))
-      --     expand = (\(i, expandBool) -> Map.singleton i (Just (Map.lookup )))
-      --          <$> nodeExpand
-      --     -- nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
-      --     -- holdDyn :: (Map Int Node) -> Event (Map Int Node) -> m (Dynamic (Map Int Node))
-      --     -- nodeMapDyn = holdDyn nodesMap (nodeExpand )
-      --     -- nodeExpand :: Event t (Int, Bool)
-      --     -- nodeExpand = switch . current $
-      --     --     leftmost
-      --     --   . Map.elems
-      --     --   . Map.mapWithKey (\k -> (k,) <$> _nodeOutput_expand)
-      --     --   <$> listOut
-      --     nodeExpand :: Event t (Int, Bool)
-      --     nodeExpand = switch . current $
-      --         leftmost
-      --       . map (\k -> (k,) <$> _nodeOutput_expand)
-      --       <$> listOut
-  pure listOut
+  let nodesList0 :: Dynamic t [Node]
+      nodesList0 = constDyn nodes0
+  simpleList nodesList0 $ \(dn :: Dynamic t Node) -> grout (fixed 2) $ do
+    (no :: NodeOutput t, _ :: Event t (NodeOutput t)) <- flip runWithReplace
+      (updated $ node <$> dn) $ do
+      n <- sample . current $ dn
+      node n
+    pure no
 
 todos
   :: forall t m.
@@ -537,7 +486,7 @@ debugFocus = do
 
 debugInput :: (VtyExample t m, MonadHold t m) => m ()
 debugInput = do
-  lastEvent <- hold "No event yet" . fmap show =<< input
+  lastEvent :: Behavior t String <- hold "No event yet" . fmap show =<< input
   text $ T.pack <$> lastEvent
 
 dragTest :: (VtyExample t m, MonadHold t m) => m ()
