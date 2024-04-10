@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Applicative
 import           Control.Concurrent
 import           Control.Monad
@@ -21,11 +22,11 @@ import qualified Graphics.Vty           as V
 import           Reflex
 import           Reflex.Network
 import           Reflex.Vty
-
+import Telomare (IExpr(..))
 import qualified Telomare               as Tel
 import qualified Telomare.Eval          as TE
 import qualified Telomare.Parser        as TP
-
+import Telomare.Parser (UnprocessedParsedTerm(..), UnprocessedParsedTermF(..))
 import           Example.CPU
 
 type VtyExample t m =
@@ -110,24 +111,60 @@ evaluare = mainWidget $ initManager_ $ do
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
-      grout flex . text $ telomareText
-      -- telomareText :: Behavior t Text
-      telomareText <- grout flex $ col $ do
+      runWithReplace (grout flex . col . text $ "Write some Telomare code and interact with the generated AST") (sequence . fmap nodeList <$> telomareNodes)
+      telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
-        -- grout (fixed $ pure 3) . btn $ centerText "parse" ' ' 45 -- TODO: center correctly
-        pure . current $ fmap ( T.pack
-                              . (\case
-                                    Right str -> str
-                                    Left str  -> str)
-                              -- . fmap (\upt -> show . TE.tagUPTwithIExpr [] $ upt)
-                              . fmap (show . TP.MultiLineShowUPT)
+        pure . updated $ fmap ( fmap (\upt -> nodify . TE.tagUPTwithIExpr [] $ upt)
+                              -- . fmap (show . TP.MultiLineShowUPT)
                               . TP.runParseLongExpr
                               . T.unpack
                               )
                               (_textInput_value telomareTextInput)
-        -- pure $ current $ fmap (T.pack . show) (_textInput_value telomareTextInput)
     pure ()
   pure $ fmap (\_ -> ()) getout
+
+
+nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
+nodify = fmap go . allNodes
+  where go :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> Node
+        go x@(anno :< uptf) = Node ( T.pack
+                                   . head
+                                   . lines
+                                   . show
+                                   . TP.MultiLineShowUPT
+                                   . Tel.forget
+                                   $ x
+                                   )
+                                   ( T.pack
+                                   . flattenEitherStringString
+                                   . fmap show
+                                   . snd
+                                   $ anno
+                                   )
+                                   False
+        allNodes :: Cofree UnprocessedParsedTermF (Int, Either String IExpr)
+                 -> [Cofree UnprocessedParsedTermF (Int, Either String IExpr)]
+        allNodes = \case
+          x@(anno :< (ITEUPF a b c)) -> x : allNodes a <> allNodes b <> allNodes c
+          x@(anno :< (ListUPF l)) -> x : (join $ allNodes <$> l)
+          x@(anno :< (LetUPF l a)) -> x : allNodes a <> (join $ allNodes <$> (snd <$> l))
+          x@(anno :< (CaseUPF a l)) -> x : allNodes a <> (join $ allNodes <$> (snd <$> l))
+          x@(anno :< (LamUPF _ a)) -> x : allNodes a
+          x@(anno :< (AppUPF a b)) -> x : allNodes a <> allNodes b
+          x@(anno :< (UnsizedRecursionUPF a b c)) -> x : allNodes a <> allNodes b <> allNodes c
+          x@(anno :< (CheckUPF a b)) -> x : allNodes a <> allNodes b
+          x@(anno :< (LeftUPF a)) -> x : allNodes a
+          x@(anno :< (RightUPF a)) -> x : allNodes a
+          x@(anno :< (TraceUPF a)) -> x : allNodes a
+          x@(anno :< (HashUPF a)) -> x : allNodes a
+          x@(anno :< (IntUPF _)) -> x : []
+          x@(anno :< (VarUPF _)) -> x : []
+          x@(anno :< (PairUPF a b)) -> x : allNodes a <> allNodes b
+
+flattenEitherStringString :: Either String String -> String
+flattenEitherStringString = \case
+  Right str -> str
+  Left str  -> str
 
 main :: IO ()
 main = mainWidget $ withCtrlC $ do
@@ -162,7 +199,7 @@ main = mainWidget $ withCtrlC $ do
             _                 -> Nothing
     rec out <- networkHold buttons $ ffor (switch (current out)) $ \case
           Left Example_Todo -> escapable taskList
-          Left Example_Node -> escapable nodeList
+          Left Example_Node -> escapable . nodeList $ nodes0Aux
           -- Left Example_TextEditor -> escapable $ localTheme (const (constant darkTheme)) testBoxes
           Left Example_TextEditor -> escapable testBoxes
           Left Example_ScrollableTextDisplay -> escapable scrolling
@@ -230,19 +267,25 @@ taskList = col $ do
       click <- tile (fixed 3) btn
   pure ()
 
+nodes0Aux =
+  [ Node "PairUP" "IExpr Foo" False
+  , Node "  IntUP 0" "IExpr Bar" True
+  , Node "  IntUP 1" "IExpr Baz" False
+  ]
+
 nodeList :: ( VtyExample t m
             , Manager t m
             , MonadHold t m
             , Adjustable t m
             , PostBuild t m
             )
-         => m ()
-nodeList = col $ do
-  let nodes0 =
-        [ Node "PairUP" "IExpr Foo" False
-        , Node "  IntUP 0" "IExpr Bar" True
-        , Node "  IntUP 1" "IExpr Baz" False
-        ]
+         => [Node] -> m ()
+nodeList nodes0 = col $ do
+  -- let nodes0 =
+  --       [ Node "PairUP" "IExpr Foo" False
+  --       , Node "  IntUP 0" "IExpr Bar" True
+  --       , Node "  IntUP 1" "IExpr Baz" False
+  --       ]
   -- void $ grout flex $ nodes nodes0
   grout flex $ nodes nodes0
   -- grout flex $ do
@@ -295,13 +338,12 @@ node n0 = do
     value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
-      -- , _nodeOutput_expand = (\_ -> ()) <$> updated value
       , _nodeOutput_expand = updated value
       , _nodeOutput_focusId = fid
       }
   -- nodeDyn :: Dynamic t Bool <- holdDyn (_node_expand n0) (_nodeOutput_expand res)
   expandTextDyn :: Dynamic t Text
-    <- fmap (\b -> if b then "  -- Zero" else "") <$>
+    <- fmap (\b -> if b then "  -- " <> _node_eval n0 else "") <$>
          holdDyn (_node_expand n0) (_nodeOutput_expand res)
   row $
      tile flex

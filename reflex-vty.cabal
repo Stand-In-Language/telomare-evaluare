@@ -108,7 +108,8 @@ executable example
     transformers,
     vty,
     telomare,
-    mtl
+    mtl,
+    free
   default-language: Haskell2010
   other-modules: Example.CPU
   default-extensions:
