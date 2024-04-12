@@ -111,7 +111,9 @@ evaluare = mainWidget $ initManager_ $ do
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
-      runWithReplace (grout flex . col . text $ "Write some Telomare code and interact with the generated AST") (sequence . fmap nodeList <$> telomareNodes)
+      runWithReplace (grout flex . col . text $
+                       "Write some Telomare code and interact with the generated AST")
+                     (sequence . fmap nodeList <$> telomareNodes)
       telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
         pure . updated $ fmap ( fmap (\upt -> nodify . TE.tagUPTwithIExpr [] $ upt)
@@ -125,41 +127,45 @@ evaluare = mainWidget $ initManager_ $ do
 
 
 nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
-nodify = fmap go . allNodes
-  where go :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> Node
-        go x@(anno :< uptf) = Node ( T.pack
-                                   . head
-                                   . lines
-                                   . show
-                                   . TP.MultiLineShowUPT
-                                   . Tel.forget
-                                   $ x
-                                   )
-                                   ( T.pack
-                                   . flattenEitherStringString
-                                   . fmap show
-                                   . snd
-                                   $ anno
-                                   )
-                                   False
-        allNodes :: Cofree UnprocessedParsedTermF (Int, Either String IExpr)
-                 -> [Cofree UnprocessedParsedTermF (Int, Either String IExpr)]
-        allNodes = \case
-          x@(anno :< (ITEUPF a b c)) -> x : allNodes a <> allNodes b <> allNodes c
-          x@(anno :< (ListUPF l)) -> x : (join $ allNodes <$> l)
-          x@(anno :< (LetUPF l a)) -> x : allNodes a <> (join $ allNodes <$> (snd <$> l))
-          x@(anno :< (CaseUPF a l)) -> x : allNodes a <> (join $ allNodes <$> (snd <$> l))
-          x@(anno :< (LamUPF _ a)) -> x : allNodes a
-          x@(anno :< (AppUPF a b)) -> x : allNodes a <> allNodes b
-          x@(anno :< (UnsizedRecursionUPF a b c)) -> x : allNodes a <> allNodes b <> allNodes c
-          x@(anno :< (CheckUPF a b)) -> x : allNodes a <> allNodes b
-          x@(anno :< (LeftUPF a)) -> x : allNodes a
-          x@(anno :< (RightUPF a)) -> x : allNodes a
-          x@(anno :< (TraceUPF a)) -> x : allNodes a
-          x@(anno :< (HashUPF a)) -> x : allNodes a
-          x@(anno :< (IntUPF _)) -> x : []
-          x@(anno :< (VarUPF _)) -> x : []
-          x@(anno :< (PairUPF a b)) -> x : allNodes a <> allNodes b
+nodify = fmap go . allNodes 0
+  where go :: (Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr)) -> Node
+        go (i, x@(anno :< uptf)) = Node ( T.pack
+                                        . (join (replicate i "  ") <>)
+                                        . head
+                                        . lines
+                                        . show
+                                        . TP.MultiLineShowUPT
+                                        . Tel.forget
+                                        $ x
+                                        )
+                                        ( T.pack
+                                        . (join (replicate i "  ") <>)
+                                        . ("-- " <>)
+                                        . flattenEitherStringString
+                                        . fmap show
+                                        . snd
+                                        $ anno
+                                        )
+                                        False
+        allNodes :: Int -- * Indentation
+                 -> Cofree UnprocessedParsedTermF (Int, Either String IExpr)
+                 -> [(Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr))]
+        allNodes i = \case
+          x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
+          x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (IntUPF _)) -> (i, x) : []
+          x@(anno :< (VarUPF _)) -> (i, x) : []
+          x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
 
 flattenEitherStringString :: Either String String -> String
 flattenEitherStringString = \case
@@ -341,9 +347,8 @@ node n0 = do
       , _nodeOutput_expand = updated value
       , _nodeOutput_focusId = fid
       }
-  -- nodeDyn :: Dynamic t Bool <- holdDyn (_node_expand n0) (_nodeOutput_expand res)
   expandTextDyn :: Dynamic t Text
-    <- fmap (\b -> if b then "  -- " <> _node_eval n0 else "") <$>
+    <- fmap (\b -> if b then _node_eval n0 else "") <$>
          holdDyn (_node_expand n0) (_nodeOutput_expand res)
   row $
      tile flex
@@ -366,12 +371,21 @@ nodes :: forall t m.
 nodes nodes0 = do
   let nodesList0 :: Dynamic t [Node]
       nodesList0 = constDyn nodes0
-  simpleList nodesList0 $ \(dn :: Dynamic t Node) -> grout (fixed 2) $ do
-    (no :: NodeOutput t, _ :: Event t (NodeOutput t)) <- flip runWithReplace
-      (updated $ node <$> dn) $ do
+  rec
+    listOut <- simpleList nodesDyn $ \(dn :: Dynamic t Node) -> do
       n <- sample . current $ dn
-      node n
-    pure no
+      -- TODO: get things so that you leave an adequate spacing for eval
+      let linesSpace :: Dynamic t Int
+          linesSpace = (\b -> if b then 2 else 4) . _node_expand <$> dn
+      grout (fixed linesSpace) $ do
+      -- grout (fixed 2) $ do
+        (no :: NodeOutput t, _ :: Event t (NodeOutput t))
+          <- runWithReplace (node n) (updated $ node <$> dn)
+        pure no
+    nodesDyn :: Dynamic t [Node]
+      <- holdDyn nodes0 (updated . join $ sequence . fmap _nodeOutput_node <$> listOut)
+  pure listOut
+
 
 todos
   :: forall t m.
