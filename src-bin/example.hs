@@ -83,49 +83,6 @@ thisIsIt = mainWidget $ (initManager_ :: forall t a m. (HasDisplayRegion t m, Re
       pure ()
   return $ fmap (\_ -> ()) getout
 
-evaluare :: IO ()
-evaluare = mainWidget $ initManager_ $ do
-  let cfg = def
-        { _textInputConfig_initialValue =
-          "Telomare code here"
-        }
-      -- textBox :: Layout t (Focus t m) a
-      textBox = boxTitle (pure roundedBoxStyle) "Text Edit" $
-        multilineTextInput cfg
-      -- btn :: Text -> m (Event t ())
-      btn label = do
-        let cfg' = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
-        buttonClick <- textButtonStatic cfg' label
-        keyPress <- keyCombos $ Set.fromList
-          [ (V.KEnter, [])
-          , (V.KChar ' ', [])
-          ]
-        pure $ leftmost [() <$ buttonClick, () <$ keyPress]
-      escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
-      escOrCtrlcQuit = do
-        inp <- input
-        pure $ fforMaybe inp $ \case
-          V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-          V.EvKey (V.KEsc) []             -> Just ()
-          _                               -> Nothing
-  getout <- escOrCtrlcQuit
-  tile flex $ box (pure roundedBoxStyle) $ row $ do
-    rec
-      runWithReplace (grout flex . col . text $
-                       "Write some Telomare code and interact with the generated AST")
-                     (sequence . fmap nodeList <$> telomareNodes)
-      telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
-        telomareTextInput :: TextInput t <- grout flex $ textBox
-        pure . updated $ fmap ( fmap (\upt -> nodify . TE.tagUPTwithIExpr [] $ upt)
-                              -- . fmap (show . TP.MultiLineShowUPT)
-                              . TP.runParseLongExpr
-                              . T.unpack
-                              )
-                              (_textInput_value telomareTextInput)
-    pure ()
-  pure $ fmap (\_ -> ()) getout
-
-
 nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
 nodify = fmap go . allNodes 0
   where go :: (Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr)) -> Node
@@ -279,28 +236,6 @@ nodes0Aux =
   , Node "  IntUP 1" "IExpr Baz" False
   ]
 
-nodeList :: ( VtyExample t m
-            , Manager t m
-            , MonadHold t m
-            , Adjustable t m
-            , PostBuild t m
-            )
-         => [Node] -> m ()
-nodeList nodes0 = col $ do
-  -- let nodes0 =
-  --       [ Node "PairUP" "IExpr Foo" False
-  --       , Node "  IntUP 0" "IExpr Bar" True
-  --       , Node "  IntUP 1" "IExpr Baz" False
-  --       ]
-  -- void $ grout flex $ nodes nodes0
-  grout flex $ nodes nodes0
-  -- grout flex $ do
-  --   row . grout flex . text $ "Hola"
-  --   row . grout flex . text $ "Hola2"
-  --   row . grout flex . text $ "Hola3"
-  pure ()
-
-
 data Node = Node
   { _node_label  :: Text
   , _node_eval   :: Text
@@ -313,18 +248,6 @@ data NodeOutput t = NodeOutput
   -- , _nodeOutput_expand  :: Event t ()
   , _nodeOutput_expand  :: Event t Bool
   , _nodeOutput_focusId :: FocusId
-  }
-
-data Todo = Todo
-  { _todo_label :: Text
-  , _todo_done  :: Bool
-  }
-  deriving (Show, Read, Eq, Ord)
-
-data TodoOutput t = TodoOutput
-  { _todoOutput_todo    :: Dynamic t Todo
-  , _todoOutput_delete  :: Event t ()
-  , _todoOutput_focusId :: FocusId
   }
 
 node :: forall t m. (VtyExample t m, HasLayout t m)
@@ -372,11 +295,11 @@ nodes nodes0 = do
   let nodesList0 :: Dynamic t [Node]
       nodesList0 = constDyn nodes0
   rec
-    listOut <- simpleList nodesDyn $ \(dn :: Dynamic t Node) -> do
+    -- listOut <- simpleList nodesDyn $ \(dn :: Dynamic t Node) -> do
+    listOut <- simpleList nodesList0 $ \(dn :: Dynamic t Node) -> do
       n <- sample . current $ dn
-      -- TODO: get things so that you leave an adequate spacing for eval
       let linesSpace :: Dynamic t Int
-          linesSpace = (\b -> if b then 2 else 4) . _node_expand <$> dn
+          linesSpace = (\b -> if b then 4 else 2) . _node_expand <$> dn
       grout (fixed linesSpace) $ do
       -- grout (fixed 2) $ do
         (no :: NodeOutput t, _ :: Event t (NodeOutput t))
@@ -384,8 +307,73 @@ nodes nodes0 = do
         pure no
     nodesDyn :: Dynamic t [Node]
       <- holdDyn nodes0 (updated . join $ sequence . fmap _nodeOutput_node <$> listOut)
+
   pure listOut
 
+nodeList :: ( VtyExample t m
+            , Manager t m
+            , MonadHold t m
+            , Adjustable t m
+            , PostBuild t m
+            )
+         => [Node] -> m ()
+nodeList nodes0 = col $ do
+  grout flex $ nodes nodes0
+  pure ()
+
+evaluare :: IO ()
+evaluare = mainWidget $ initManager_ $ do
+  let cfg = def
+        { _textInputConfig_initialValue =
+          "Telomare code here"
+        }
+      -- textBox :: Layout t (Focus t m) a
+      textBox = boxTitle (pure roundedBoxStyle) "Text Edit" $
+        multilineTextInput cfg
+      -- btn :: Text -> m (Event t ())
+      btn label = do
+        let cfg' = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
+        buttonClick <- textButtonStatic cfg' label
+        keyPress <- keyCombos $ Set.fromList
+          [ (V.KEnter, [])
+          , (V.KChar ' ', [])
+          ]
+        pure $ leftmost [() <$ buttonClick, () <$ keyPress]
+      escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
+      escOrCtrlcQuit = do
+        inp <- input
+        pure $ fforMaybe inp $ \case
+          V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
+          V.EvKey (V.KEsc) []             -> Just ()
+          _                               -> Nothing
+  getout <- escOrCtrlcQuit
+  tile flex $ box (pure roundedBoxStyle) $ row $ do
+    rec
+      runWithReplace (grout flex . col . text $
+                       "Write some Telomare code and interact with the generated AST")
+                     (sequence . fmap nodeList <$> telomareNodes)
+      telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
+        telomareTextInput :: TextInput t <- grout flex $ textBox
+        pure . updated $ fmap ( fmap (\upt -> nodify . TE.tagUPTwithIExpr [] $ upt)
+                              -- . fmap (show . TP.MultiLineShowUPT)
+                              . TP.runParseLongExpr
+                              . T.unpack
+                              )
+                              (_textInput_value telomareTextInput)
+    pure ()
+  pure $ fmap (\_ -> ()) getout
+
+data Todo = Todo
+  { _todo_label :: Text
+  , _todo_done  :: Bool
+  }
+  deriving (Show, Read, Eq, Ord)
+
+data TodoOutput t = TodoOutput
+  { _todoOutput_todo    :: Dynamic t Todo
+  , _todoOutput_delete  :: Event t ()
+  , _todoOutput_focusId :: FocusId
+  }
 
 todos
   :: forall t m.
