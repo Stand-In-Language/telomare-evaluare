@@ -272,7 +272,7 @@ node n0 = do
       , _nodeOutput_focusId = fid
       }
   expandTextDyn :: Dynamic t Text
-    <- fmap (bool (_node_eval n0) "") <$>
+    <- fmap (bool "" (_node_eval n0)) <$>
          holdDyn (_node_expand n0) (_nodeOutput_expand res)
   row $
      tile flex
@@ -293,17 +293,17 @@ nodes :: forall t m.
       => [Node]
       -> m (Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
-  let nodesList0 :: Dynamic t [Node]
-      nodesList0 = constDyn nodes0
-      nodeMaps0 = Map.fromList $ zip [0..] nodes0
+  let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
-    listOut' :: Dynamic t (Map Int (NodeOutput t))
+    listOut :: Dynamic t (Map Int (NodeOutput t))
       <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
            no <- grout (fixed 4) $ node v
            pure no
-    let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
-        eventMapMaybeNodes = coincidence $ mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut')
-  pure listOut'
+    -- let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
+        -- eventMapMaybeNodes = coincidence $
+    eventMapMaybeNodes <- switchHold never $
+          mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
+  pure listOut
 
 nodeList :: ( VtyExample t m
             , Manager t m
