@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import Data.Bool (bool)
 import Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Applicative
 import           Control.Concurrent
@@ -236,6 +237,10 @@ nodes0Aux =
   , Node "  IntUP 1" "IExpr Baz" False
   ]
 
+-- Hi! I've made loads of progress (I've added a GIF to show it off). Mostly by taking advantage of the suggestion of using `runWithReplace`.
+
+-- Now I'm trying to make the space between nodes to be rendered only if the checkbox is clicked, but the way I'm trying it brings a memory leak and completely freezes the app.
+
 data Node = Node
   { _node_label  :: Text
   , _node_eval   :: Text
@@ -271,7 +276,7 @@ node n0 = do
       , _nodeOutput_focusId = fid
       }
   expandTextDyn :: Dynamic t Text
-    <- fmap (\b -> if b then _node_eval n0 else "") <$>
+    <- fmap (bool (_node_eval n0) "") <$>
          holdDyn (_node_expand n0) (_nodeOutput_expand res)
   row $
      tile flex
@@ -290,25 +295,54 @@ nodes :: forall t m.
          , PostBuild t m
          )
       => [Node]
-      -> m (Dynamic t [NodeOutput t])
+      -- -> m (Dynamic t [NodeOutput t])
+      -> m (Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
   let nodesList0 :: Dynamic t [Node]
       nodesList0 = constDyn nodes0
+      nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
+    -- listHoldWithKey
+    -- :: forall t m k v a
+    --  . (Ord k, Adjustable t m, MonadHold t m)
+    -- => Map k v
+    -- -> Event t (Map k (Maybe v))
+    -- -> (k -> v -> m a)
+    -- -> m (Dynamic t (Map k a))
+    listOut' :: Dynamic t (Map Int (NodeOutput t))
+      <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
+      -- <- listHoldWithKey nodeMaps0 undefined $ \_ v -> do
+           -- rec
+           no <- grout (fixed 4) $ node v
+             -- let linesSpace :: Dynamic t Int
+             --     linesSpace = bool 4 2 . _node_expand <$> _nodeOutput_node no
+           -- grout flex . col . text . current .
+           -- fmap (T.pack . show) $ traceEvent "myTraceDyn" (updated dynMapMaybeNodes)
+           pure no
+    -- grout flex . col . text . current . fmap (T.pack . show) $ traceDyn "myTraceDyn" dynMapMaybeNodes
+    let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
+        -- eventMapMaybeNodes :: Int
+        -- Event t (Map Int (Event t0 (Map k20 a0)))
+        -- eventMapMaybeNodes = joinDynThroughMap $ fmap (fmap Just . _nodeOutput_node) <$> (updated listOut')
+        eventMapMaybeNodes = coincidence $
+          mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut')
+        -- dynMapMaybeNodes = join $ sequence . fmap (fmap Just . _nodeOutput_node) <$> listOut'
     -- listOut <- simpleList nodesDyn $ \(dn :: Dynamic t Node) -> do
-    listOut <- simpleList nodesList0 $ \(dn :: Dynamic t Node) -> do
-      n <- sample . current $ dn
-      let linesSpace :: Dynamic t Int
-          linesSpace = (\b -> if b then 4 else 2) . _node_expand <$> dn
-      grout (fixed linesSpace) $ do
-      -- grout (fixed 2) $ do
-        (no :: NodeOutput t, _ :: Event t (NodeOutput t))
-          <- runWithReplace (node n) (updated $ node <$> dn)
-        pure no
-    nodesDyn :: Dynamic t [Node]
-      <- holdDyn nodes0 (updated . join $ sequence . fmap _nodeOutput_node <$> listOut)
+    -- listOut <- simpleList nodesList0 $ \(dn :: Dynamic t Node) -> do
 
-  pure listOut
+    --   n <- sample . current $ dn
+    --   let linesSpace :: Dynamic t Int
+    --       linesSpace = bool 4 2 . _node_expand <$> dn
+    --   grout (fixed linesSpace) $ do
+    --   -- grout (fixed 2) $ do
+    --     (no :: NodeOutput t, _ :: Event t (NodeOutput t))
+    --       <- runWithReplace (node n) (updated $ node <$> dn)
+    --     pure no
+    -- dynMapMaybeNodes :: Dynamic t ( <- (fmap . fmap . fmap) Just $ join $ sequence . fmap (_nodeOutput_node) <$> listOut'
+    -- nodesDyn :: Dynamic t [Node]
+    --   <- holdDyn nodes0 (updated . join $ sequence . fmap _nodeOutput_node <$> listOut)
+  pure listOut'
+  -- pure undefined
 
 nodeList :: ( VtyExample t m
             , Manager t m
