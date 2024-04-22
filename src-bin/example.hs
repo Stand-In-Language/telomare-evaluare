@@ -251,7 +251,11 @@ data NodeOutput t = NodeOutput
   , _nodeOutput_focusId :: FocusId
   }
 
-node :: forall t m. (VtyExample t m, HasLayout t m)
+node :: forall t m. ( VtyExample t m
+                    , HasLayout t m
+                    , HasInput t m
+                    , HasImageWriter t m
+                    )
      => Node
      -> m (NodeOutput t)
 node n0 = do
@@ -289,6 +293,7 @@ nodes :: forall t m.
          , VtyExample t m
          , Adjustable t m
          , PostBuild t m
+         -- , HasInput t m
          )
       => [Node]
       -> m (Dynamic t (Map Int (NodeOutput t)))
@@ -296,12 +301,22 @@ nodes nodes0 = do
   let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
     listOut :: Dynamic t (Map Int (NodeOutput t))
-      <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
-           no <- grout (fixed 4) $ node v
-           pure no
+      <- listWithKey dynMapList $ \k (dn :: Dynamic t Node) -> do
+           (_, eno :: Event t (NodeOutput t))
+             <- runWithReplace (grout (fixed 2) . text $ "HOLA") (updated $ grout (fixed 2) . node <$> dn)
+           -- dno :: Dynamic t (NodeOutput t) <- networkHold undefined -- (pure $ Map.lookup k nodeMaps0)
+           --                                                (updated $  grout (fixed 2) . node <$> dn)
+           undefined
+    -- listOut :: Dynamic t (Map Int (NodeOutput t))
+    --   <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
+    --        no <- grout (fixed 2) $ node v
+    --        pure no
     -- let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
         -- eventMapMaybeNodes = coincidence $
-    eventMapMaybeNodes <- switchHold never $
+    let -- dynMapListOut :: Dynamic t (Map Int Node)
+        dynMapList :: Dynamic t (Map Int Node)
+        dynMapList = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
+    eventMapMaybeNodes :: Event t (Map Int (Maybe Node)) <- switchHold never $
           mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
   pure listOut
 
@@ -310,6 +325,7 @@ nodeList :: ( VtyExample t m
             , MonadHold t m
             , Adjustable t m
             , PostBuild t m
+            , HasInput t m
             )
          => [Node] -> m ()
 nodeList nodes0 = col $ do
