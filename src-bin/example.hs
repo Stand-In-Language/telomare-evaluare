@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import Data.Maybe (fromMaybe)
 import Data.Bool (bool)
 import Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Applicative
@@ -83,52 +84,6 @@ thisIsIt = mainWidget $ (initManager_ :: forall t a m. (HasDisplayRegion t m, Re
           let numClicksText = current $ fmap (T.pack . show) numClicks
       pure ()
   return $ fmap (\_ -> ()) getout
-
-nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
-nodify = fmap go . allNodes 0
-  where go :: (Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr)) -> Node
-        go (i, x@(anno :< uptf)) = Node ( T.pack
-                                        . (join (replicate i "  ") <>)
-                                        . head
-                                        . lines
-                                        . show
-                                        . TP.MultiLineShowUPT
-                                        . Tel.forget
-                                        $ x
-                                        )
-                                        ( T.pack
-                                        . (join (replicate i "  ") <>)
-                                        . ("-- " <>)
-                                        . flattenEitherStringString
-                                        . fmap show
-                                        . snd
-                                        $ anno
-                                        )
-                                        False
-        allNodes :: Int -- * Indentation
-                 -> Cofree UnprocessedParsedTermF (Int, Either String IExpr)
-                 -> [(Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr))]
-        allNodes i = \case
-          x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
-          x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (IntUPF _)) -> (i, x) : []
-          x@(anno :< (VarUPF _)) -> (i, x) : []
-          x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-
-flattenEitherStringString :: Either String String -> String
-flattenEitherStringString = \case
-  Right str -> str
-  Left str  -> str
 
 main :: IO ()
 main = mainWidget $ withCtrlC $ do
@@ -248,7 +203,6 @@ data NodeOutput t = NodeOutput
   { _nodeOutput_node    :: Dynamic t Node
   -- , _nodeOutput_expand  :: Event t ()
   , _nodeOutput_expand  :: Event t Bool
-  , _nodeOutput_focusId :: FocusId
   }
 
 node :: forall t m. ( VtyExample t m
@@ -273,7 +227,6 @@ node n0 = do
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
       , _nodeOutput_expand = updated value
-      , _nodeOutput_focusId = fid
       }
   expandTextDyn :: Dynamic t Text
     <- fmap (bool "" (_node_eval n0)) <$>
@@ -300,25 +253,69 @@ nodes :: forall t m.
 nodes nodes0 = do
   let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
-    listOut :: Dynamic t (Map Int (NodeOutput t))
-      <- listWithKey dynMapList $ \k (dn :: Dynamic t Node) -> do
-           (_, eno :: Event t (NodeOutput t))
-             <- runWithReplace (grout (fixed 2) . text $ "HOLA") (updated $ grout (fixed 2) . node <$> dn)
+
+    dw <- displayWidth
+    dh <- displayHeight
+    let div' :: (Integral a) => Dynamic t a -> Dynamic t a -> Dynamic t a
+        div' = liftA2 div
+        region1 = Region <$> (div' dw 6) <*> (div' dh 6) <*> (div' dw 2) <*> (div' dh 2)
+        region2 = Region <$> (div' dw 4) <*> (div' dh 4) <*> (2 * div' dw 3) <*> (2 * div' dh 3)
+    pane region1 (constDyn False) . boxStatic singleBoxStyle $ debugEvent eventMapNodes''
+    listOut <- pane region2 (constDyn True) . boxStatic singleBoxStyle $
+
+    -- listOut :: Dynamic t (Map Int (NodeOutput t))
+    --   <- listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
+      listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
+           let node2nodeOutput :: Event t Bool -> Node -> NodeOutput t
+               node2nodeOutput eb (Node x y z) = NodeOutput
+                 { _nodeOutput_node = Node x y <$> constDyn False
+                 , _nodeOutput_expand = eb
+                 }
+               linesSpace :: Dynamic t Int
+               -- linesSpace = bool 2 5 . _node_expand <$> dn
+               linesSpace = bool 2 5 <$> expandedDyn
+           n <- sample . current $ dn
+           res <- grout (fixed linesSpace) $ do
+             (_, eno :: Event t (NodeOutput t))
+               -- <- runWithReplace (grout (fixed 2) . text $ "HOLA") (updated $ grout (fixed 2) . node <$> dn)
+               <- runWithReplace (node n) (updated $ node <$> dn)
            -- dno :: Dynamic t (NodeOutput t) <- networkHold undefined -- (pure $ Map.lookup k nodeMaps0)
            --                                                (updated $  grout (fixed 2) . node <$> dn)
-           undefined
+             -- let eb :: Event t Bool
+             eb <- switchHold never $ _nodeOutput_expand <$> eno
+             x :: Behavior t (NodeOutput t) <- fmap current $ holdDyn (node2nodeOutput eb n) eno
+             sample x
+           pure res
+    eventMapNodes :: Event t (Map Int Node) <- switchHold never $
+      mergeMap . fmap (updated . _nodeOutput_node) <$> (updated listOut)
+    dynMapNodes <- holdDyn nodeMaps0 eventMapNodes
+    let expandedK :: Event t Bool
+        expandedK = switch . current $ leftmost . Map.elems . fmap _nodeOutput_expand <$> listOut
+        eventMapNodes' = coincidence $
+          mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
+    eventMapNodes'' <- switchHold never $
+          mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
+    expandedDyn :: Dynamic t Bool <- holdDyn False expandedK
+    -- todoDelete :: Event t Int
+    -- todoDelete = switch . current $
+    --   leftmost . Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
+  pure listOut
     -- listOut :: Dynamic t (Map Int (NodeOutput t))
     --   <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
     --        no <- grout (fixed 2) $ node v
     --        pure no
     -- let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
         -- eventMapMaybeNodes = coincidence $
-    let -- dynMapListOut :: Dynamic t (Map Int Node)
-        dynMapList :: Dynamic t (Map Int Node)
-        dynMapList = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
-    eventMapMaybeNodes :: Event t (Map Int (Maybe Node)) <- switchHold never $
-          mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
-  pure listOut
+    -- let -- dynMapListOut :: Dynamic t (Map Int Node)
+    --     dynMapList :: Dynamic t (Map Int Node)
+    --     dynMapList = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
+    -- eventMapMaybeNodes :: Event t (Map Int (Maybe Node)) <- switchHold never $
+    --       mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
+
+debugEvent :: (Show a, VtyExample t m, MonadHold t m) => Event t a -> m ()
+debugEvent event = do
+  lastEvent :: Behavior t String <- hold "No event yet" . fmap show =<< (pure (traceEventWith (\e -> "hola1: " <> show e) event))
+  text $ T.pack <$> lastEvent
 
 nodeList :: ( VtyExample t m
             , Manager t m
@@ -331,6 +328,53 @@ nodeList :: ( VtyExample t m
 nodeList nodes0 = col $ do
   grout flex $ nodes nodes0
   pure ()
+
+
+nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
+nodify = fmap go . allNodes 0
+  where go :: (Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr)) -> Node
+        go (i, x@(anno :< uptf)) = Node ( T.pack
+                                        . (join (replicate i "  ") <>)
+                                        . head
+                                        . lines
+                                        . show
+                                        . TP.MultiLineShowUPT
+                                        . Tel.forget
+                                        $ x
+                                        )
+                                        ( T.pack
+                                        . (join (replicate i "  ") <>)
+                                        . ("-- " <>)
+                                        . flattenEitherStringString
+                                        . fmap show
+                                        . snd
+                                        $ anno
+                                        )
+                                        False
+        -- TODO: something more elegant
+        allNodes :: Int -- * Indentation
+                 -> Cofree UnprocessedParsedTermF (Int, Either String IExpr)
+                 -> [(Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr))]
+        allNodes i = \case
+          x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
+          x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (IntUPF _)) -> (i, x) : []
+          x@(anno :< (VarUPF _)) -> (i, x) : []
+          x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+        flattenEitherStringString :: Either String String -> String
+        flattenEitherStringString = \case
+          Right str -> str
+          Left str  -> str
 
 evaluare :: IO ()
 evaluare = mainWidget $ initManager_ $ do
@@ -365,7 +409,7 @@ evaluare = mainWidget $ initManager_ $ do
                      (sequence . fmap nodeList <$> telomareNodes)
       telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
-        pure . updated $ fmap ( fmap (\upt -> nodify . TE.tagUPTwithIExpr [] $ upt)
+        pure . updated $ fmap ( fmap (nodify . TE.tagUPTwithIExpr [])
                               -- . fmap (show . TP.MultiLineShowUPT)
                               . TP.runParseLongExpr
                               . T.unpack
