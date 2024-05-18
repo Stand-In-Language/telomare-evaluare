@@ -1,5 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import Data.Either (fromRight)
+import Data.Maybe (listToMaybe)
+import Data.Bifunctor (first)
 import Data.Maybe (fromMaybe)
 import Data.Bool (bool)
 import Control.Comonad.Cofree (Cofree ((:<)))
@@ -224,20 +227,23 @@ node n0 = do
       grout flex . text . pure . _node_label $ n0
       pure ()
     value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+    -- value2 :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+    -- varOverride <- tile (fixed 35) $ boxTitle (pure roundedBoxStyle) "Override variables:" $
+    --     multilineTextInput def
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
       , _nodeOutput_expand = updated value
       }
-  expandTextDyn :: Dynamic t Text
-    <- fmap (bool "" (_node_eval n0)) <$>
-         holdDyn (_node_expand n0) (_nodeOutput_expand res)
-  row $
-     tile flex
-   . grout flex
-   -- . box (pure roundedBoxStyle)
-   . text
-   . current
-   $ expandTextDyn
+  -- expandTextDyn :: Dynamic t Text
+  --   <- fmap (bool "" (_node_eval n0)) <$>
+  --        holdDyn (_node_expand n0) (_nodeOutput_expand res)
+  -- row $
+  --    tile flex
+  --  . grout flex
+  --  -- . box (pure roundedBoxStyle)
+  --  . text
+  --  . current
+  --  $ expandTextDyn
   pure res
 
 nodes :: forall t m.
@@ -249,7 +255,7 @@ nodes :: forall t m.
          -- , HasInput t m
          )
       => [Node]
-      -> m (Dynamic t (Map Int (NodeOutput t)))
+      -> m (Event t Text, Dynamic t (Map Int (NodeOutput t)))
 nodes nodes0 = do
   let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
@@ -260,46 +266,63 @@ nodes nodes0 = do
         div' = liftA2 div
         region1 = Region <$> (div' dw 6) <*> (div' dh 6) <*> (div' dw 2) <*> (div' dh 2)
         region2 = Region <$> (div' dw 4) <*> (div' dh 4) <*> (2 * div' dw 3) <*> (2 * div' dh 3)
-    pane region1 (constDyn False) . boxStatic singleBoxStyle $ debugEvent eventMapNodes''
-    listOut <- pane region2 (constDyn True) . boxStatic singleBoxStyle $
+    -- pane region1 (constDyn False) . boxStatic singleBoxStyle $ debugEvent expandedIndex
+    listOut :: Dynamic t (Map Int (NodeOutput t))
+      <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
+           no <- grout (fixed 1) $ node v
+           pure no
+    -- let eventMapMaybeNodes :: Event t (Map Int (Maybe Node))
+        -- eventMapMaybeNodes = coincidence $
+    eventMapMaybeNodes <- switchHold never $
+          mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
+    -- listOut <- -- pane region2 (constDyn True) . boxStatic singleBoxStyle $
 
-    -- listOut :: Dynamic t (Map Int (NodeOutput t))
-    --   <- listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
-      listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
-           let node2nodeOutput :: Event t Bool -> Node -> NodeOutput t
-               node2nodeOutput eb (Node x y z) = NodeOutput
-                 { _nodeOutput_node = Node x y <$> constDyn False
-                 , _nodeOutput_expand = eb
-                 }
-               linesSpace :: Dynamic t Int
-               -- linesSpace = bool 2 5 . _node_expand <$> dn
-               linesSpace = bool 2 5 <$> expandedDyn
-           n <- sample . current $ dn
-           res <- grout (fixed linesSpace) $ do
-             (_, eno :: Event t (NodeOutput t))
-               -- <- runWithReplace (grout (fixed 2) . text $ "HOLA") (updated $ grout (fixed 2) . node <$> dn)
-               <- runWithReplace (node n) (updated $ node <$> dn)
-           -- dno :: Dynamic t (NodeOutput t) <- networkHold undefined -- (pure $ Map.lookup k nodeMaps0)
-           --                                                (updated $  grout (fixed 2) . node <$> dn)
-             -- let eb :: Event t Bool
-             eb <- switchHold never $ _nodeOutput_expand <$> eno
-             x :: Behavior t (NodeOutput t) <- fmap current $ holdDyn (node2nodeOutput eb n) eno
-             sample x
-           pure res
-    eventMapNodes :: Event t (Map Int Node) <- switchHold never $
-      mergeMap . fmap (updated . _nodeOutput_node) <$> (updated listOut)
-    dynMapNodes <- holdDyn nodeMaps0 eventMapNodes
-    let expandedK :: Event t Bool
-        expandedK = switch . current $ leftmost . Map.elems . fmap _nodeOutput_expand <$> listOut
-        eventMapNodes' = coincidence $
-          mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
-    eventMapNodes'' <- switchHold never $
-          mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
-    expandedDyn :: Dynamic t Bool <- holdDyn False expandedK
+    -- -- listOut :: Dynamic t (Map Int (NodeOutput t))
+    -- --   <- listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
+    --   listWithKey dynMapNodes $ \k (dn :: Dynamic t Node) -> do
+    --        let node2nodeOutput :: Event t Bool -> Node -> NodeOutput t
+    --            node2nodeOutput eb (Node x y z) = NodeOutput
+    --              { _nodeOutput_node = Node x y <$> constDyn False
+    --              , _nodeOutput_expand = eb
+    --              }
+    --            -- linesSpace :: Dynamic t Int
+    --            -- -- linesSpace = bool 2 5 . _node_expand <$> dn
+    --            -- linesSpace = bool 2 5 <$> expandedDyn
+    --        n <- sample . current $ dn
+    --        res <- grout (fixed 1) $ do
+    --          (_, eno :: Event t (NodeOutput t))
+    --            -- <- runWithReplace (grout (fixed 2) . text $ "HOLA") (updated $ grout (fixed 2) . node <$> dn)
+    --            <- runWithReplace (node n) (updated $ node <$> dn)
+    --        -- dno :: Dynamic t (NodeOutput t) <- networkHold undefined -- (pure $ Map.lookup k nodeMaps0)
+    --        --                                                (updated $  grout (fixed 2) . node <$> dn)
+    --          -- let eb :: Event t Bool
+    --          eb <- switchHold never $ _nodeOutput_expand <$> eno
+    --          x :: Behavior t (NodeOutput t) <- fmap current $ holdDyn (node2nodeOutput eb n) eno
+    --          sample x
+    --        pure res
+    -- eventMapNodes :: Event t (Map Int Node) <- switchHold never $
+    --   mergeMap . fmap (updated . _nodeOutput_node) <$> (updated listOut)
+    -- dynMapNodes <- holdDyn nodeMaps0 eventMapNodes
+
+    -- let expandedK :: Event t Bool
+    --     expandedK = switch . current $ leftmost . Map.elems . fmap _nodeOutput_expand <$> listOut
+    --     expandedIndex :: Event t Int
+    --     expandedIndex = switch . current $
+    --       leftmost . Map.elems . Map.mapWithKey (\k -> (k <$) . _nodeOutput_expand) <$> listOut
+    let expandedEvalText :: Event t Text
+        expandedEvalText = switchDyn $
+          leftmost . Map.elems . fmap (fmap _node_eval . updated . _nodeOutput_node) <$> listOut
     -- todoDelete :: Event t Int
     -- todoDelete = switch . current $
     --   leftmost . Map.elems . Map.mapWithKey (\k -> (k <$) . _todoOutput_delete) <$> listOut
-  pure listOut
+
+    --     eventMapNodes' = coincidence $
+    --       mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
+    -- eventMapNodes'' <- switchHold never $
+    --       mergeMap . fmap _nodeOutput_expand <$> (updated listOut)
+    -- expandedDyn :: Dynamic t Bool <- holdDyn False expandedK
+
+  pure (expandedEvalText, listOut)
     -- listOut :: Dynamic t (Map Int (NodeOutput t))
     --   <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
     --        no <- grout (fixed 2) $ node v
@@ -324,11 +347,12 @@ nodeList :: ( VtyExample t m
             , PostBuild t m
             , HasInput t m
             )
-         => [Node] -> m ()
+         => [Node] -> m (Event t Text)
 nodeList nodes0 = col $ do
-  grout flex $ nodes nodes0
-  pure ()
+  grout flex $ fst <$> nodes nodes0
 
+
+-- (\x -> x) 0
 
 nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
 nodify = fmap go . allNodes 0
@@ -344,9 +368,9 @@ nodify = fmap go . allNodes 0
                                         )
                                         ( T.pack
                                         . (join (replicate i "  ") <>)
-                                        . ("-- " <>)
+                                        -- . ("-- " <>)
                                         . flattenEitherStringString
-                                        . fmap show
+                                        . fmap (show . Tel.PrettierIExpr)
                                         . snd
                                         $ anno
                                         )
@@ -404,7 +428,56 @@ evaluare = mainWidget $ initManager_ $ do
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
-      runWithReplace (grout flex . col . text $
+      -- hold     :: a ->   Event a -> m (Behavior a)
+      -- bEitherTextNodes :: Behavior t (Either Text [Node]) <- hold (Left "No node to be evaled yet") ((fmap . first) T.pack $ telomareNodes)
+      let
+          -- getEval :: Either Text [Node] -> Text
+          -- getEval esn =
+          --   case esn of
+          --     Left txt -> txt
+          --     Right nodes -> fromMaybe "BLAAAA" $ fmap _node_eval . listToMaybe . filter (\n -> not . _node_expand $ n) $ nodes
+          -- aux :: forall t. (Reflex t) =>  Event t (Behavior t Text)
+          -- aux :: Event t (Behavior t Text)
+
+          -- aux :: Event t (Behavior t (Dynamic t Text))
+          -- aux = fmap (getEvalAux . first T.pack) . current . sequence <$> eventnl -- (traceEventWith (const "HEYYY") $ eventnl)
+          -- aux1 = fmap (current . getEvalAux . first T.pack) aux
+
+          -- getEvalAux :: (Reflex t) => Either Text (Map Int (NodeOutput t))
+          --            -> Dynamic t Text
+          -- getEvalAux = \case
+          --   Left txt -> constDyn txt
+          --   Right mapin -> fromMaybe (constDyn "BLEEEE") $ fmap _node_eval .  _nodeOutput_node . snd <$> (listToMaybe . Map.toList $ mapin)
+          -- aux' :: Either a1 (Map Int (NodeOutput t)) -> Dynamic t Text
+          -- aux' (Right mapin) = fromMaybe (constDyn "BLEEEE") $ fmap _node_eval .  _nodeOutput_node . snd <$> (listToMaybe . Map.toList $ mapin)
+          -- listEvents = sequence . fmap sequence $ telomareNodes
+
+      -- finalText' :: Behavior t (Dynamic t Text) <- switcher (constant (constDyn "BLIIII")) aux
+      -- grout flex . col . text $ (join $ current <$> finalText')
+      -- finalText :: Behavior t Text <- switcher (constant "BLIIII") (fmap (current . getEvalAux . first T.pack) . coincidence . fmap (updated . sequence) $ eventnl)
+      -- grout flex . col . text $ finalText
+      -- (_, eventnl :: Event t (Either String (Dynamic t (Map Int (NodeOutput t))))) <- runWithReplace (grout flex . col . text $
+          -- aux :: (Reflex t) =>  Event t (Either (Event t Text) (Event t Text))
+          -- aux = eEventEval
+          -- auxfoo :: forall t m.
+          --           ( MonadHold t m
+          --           , Manager t m
+          --           , VtyExample t m
+          --           , Adjustable t m
+          --           )
+          --        => Either String (Event t Text) -> Event t Text
+          -- auxfoo = \case
+          --   -- Left str -> pure . constDyn . T.pack $ str
+          --   -- Right et -> holdDyn "YES22222" et
+          --   Left str -> never
+          --   Right et -> et
+          aux = fromRight never <$> eEventEval
+      et :: Event t Text <- switchHold never aux
+      bt <- hold "WHIIII" et
+      grout flex . col . text $ bt
+      (_, eEventEval :: Event t (Either String (Event t Text))) <- runWithReplace (grout flex . col . text $
+
+      -- (_, eEventEval) <- (fmap . fmap) (fromRight never) $ runWithReplace (grout flex . col . text $
                        "Write some Telomare code and interact with the generated AST")
                      (sequence . fmap nodeList <$> telomareNodes)
       telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
@@ -417,6 +490,18 @@ evaluare = mainWidget $ initManager_ $ do
                               (_textInput_value telomareTextInput)
     pure ()
   pure $ fmap (\_ -> ()) getout
+
+-- getEvalAux :: -- forall t m.
+--               ( Manager t m
+--               , VtyExample t m
+--               , Adjustable t m
+--               , PostBuild t m
+--               )
+--            => Either Text (Map Int (NodeOutput t)) -> Dynamic t Text
+-- getEvalAux = \case
+--   Left txt -> constDyn txt
+--   Right mapin -> fromMaybe (constDyn "BLEEEE") $ fmap _node_eval .  _nodeOutput_node . snd <$> (listToMaybe . Map.toList $ mapin)
+
 
 data Todo = Todo
   { _todo_label :: Text
