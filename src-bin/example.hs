@@ -327,11 +327,13 @@ nodify = fmap go . allNodes 0
 evaluare :: IO ()
 evaluare = mainWidget $ initManager_ $ do
   let cfg = def
-        { _textInputConfig_initialValue =
-          "Telomare code here"
+        { _textInputConfig_initialValue = TZ.fromText . T.pack . unlines $
+            [ "-- Example:"
+            , "(\\x -> 0) "
+            ]
         }
       -- textBox :: Layout t (Focus t m) a
-      textBox = boxTitle (pure roundedBoxStyle) "Text Edit" $
+      textBox = boxTitle (pure roundedBoxStyle) "Telomare" $
         multilineTextInput cfg
       -- btn :: Text -> m (Event t ())
       btn label = do
@@ -352,20 +354,17 @@ evaluare = mainWidget $ initManager_ $ do
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
-      et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      bt <- hold "WHIIII" et
-      grout flex . col . text $ bt
-      (_, eEventEval :: Event t (Either String (Event t Text)))
-        <- runWithReplace (grout flex . col . text $
-                           "Write some Telomare code and interact with the generated AST")
-                          (sequence . fmap nodeList <$> telomareNodes)
-      telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
+      eitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
-        pure . updated $ fmap ( fmap (nodify . TE.tagUPTwithIExpr [])
-                              . TP.runParseLongExpr
-                              . T.unpack
-                              )
-                              (_textInput_value telomareTextInput)
+        pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
+      let flattenHomogenousEither :: Either a a -> a
+          flattenHomogenousEither = \case
+            Right x -> x
+            Left x  -> x
+      bt <- hold "( D\n    0\n, 0\n)" $ T.pack . flattenHomogenousEither . fmap (show . Tel.PrettierIExpr) <$> eitherIExpr
+      grout (fixed 2) . col . text $ ""
+      grout flex . col . text $ "\n" <> bt
+
     pure ()
   pure $ fmap (\_ -> ()) getout
 
