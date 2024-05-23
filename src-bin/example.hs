@@ -2,7 +2,7 @@
 
 import Data.Either (fromRight)
 import Data.Maybe (listToMaybe)
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, bimap)
 import Data.Maybe (fromMaybe)
 import Data.Bool (bool)
 import Control.Comonad.Cofree (Cofree ((:<)))
@@ -27,7 +27,7 @@ import qualified Graphics.Vty           as V
 import           Reflex
 import           Reflex.Network
 import           Reflex.Vty
-import Telomare (IExpr(..))
+import Telomare (IExpr(..), IExprF (..))
 import qualified Telomare               as Tel
 import qualified Telomare.Eval          as TE
 import qualified Telomare.Parser        as TP
@@ -279,50 +279,59 @@ nodeList nodes0 = col $ do
 
 -- (\x -> x) 0
 
-nodify :: Cofree UnprocessedParsedTermF (Int, Either String IExpr) -> [Node]
+nodify :: Cofree IExprF (Int, Either Tel.RunTimeError IExpr) -> [Node]
 nodify = fmap go . allNodes 0
-  where go :: (Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr)) -> Node
+  where go :: (Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr)) -> Node
         go (i, x@(anno :< uptf)) = Node ( T.pack
                                         . (join (replicate i "  ") <>)
                                         . head
                                         . lines
                                         . show
-                                        . TP.MultiLineShowUPT
+                                        . Tel.PrettierIExpr
                                         . Tel.forget
                                         $ x
                                         )
                                         ( T.pack
                                         . (join (replicate i "  ") <>)
                                         . flattenEitherStringString
-                                        . fmap (show . Tel.PrettierIExpr)
+                                        . bimap show (show . Tel.PrettierIExpr)
                                         . snd
                                         $ anno
                                         )
                                         False
         -- TODO: something more elegant
         allNodes :: Int -- * Indentation
-                 -> Cofree UnprocessedParsedTermF (Int, Either String IExpr)
-                 -> [(Int, Cofree UnprocessedParsedTermF (Int, Either String IExpr))]
+                 -> Cofree IExprF (Int, Either Tel.RunTimeError IExpr)
+                 -> [(Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr))]
         allNodes i = \case
-          x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
-          x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (IntUPF _)) -> (i, x) : []
-          x@(anno :< (VarUPF _)) -> (i, x) : []
-          x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< ZeroF) -> (i, x) : []
+          x@(anno :< EnvF) -> (i, x) : []
+          x@(anno :< TraceF) -> (i, x) : []
+          x@(anno :< (SetEnvF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (DeferF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (PLeftF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
+          x@(anno :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          x@(anno :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
         flattenEitherStringString :: Either String String -> String
         flattenEitherStringString = \case
           Right str -> str
           Left str  -> str
+          -- x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          -- x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
+          -- x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          -- x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
+          -- x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
+          -- x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          -- x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
+          -- x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+          -- x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
+          -- x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
+          -- x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
+          -- x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
+          -- x@(anno :< (IntUPF _)) -> (i, x) : []
+          -- x@(anno :< (VarUPF _)) -> (i, x) : []
+          -- x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
 
 evaluare :: IO ()
 evaluare = mainWidget $ initManager_ $ do
@@ -357,14 +366,37 @@ evaluare = mainWidget $ initManager_ $ do
       eitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex $ textBox
         pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
-      let flattenHomogenousEither :: Either a a -> a
-          flattenHomogenousEither = \case
-            Right x -> x
-            Left x  -> x
-      bt <- hold "( D\n    0\n, 0\n)" $ T.pack . flattenHomogenousEither . fmap (show . Tel.PrettierIExpr) <$> eitherIExpr
+      -- let flattenHomogenousEither :: Either a a -> a
+      --     flattenHomogenousEither = \case
+      --       Right x -> x
+      --       Left x  -> x
+      -- bt <- hold "( D\n    0\n, 0\n)" $ T.pack . flattenHomogenousEither . fmap (show . Tel.PrettierIExpr) <$> eitherIExpr
       grout (fixed 2) . col . text $ ""
-      grout flex . col . text $ "\n" <> bt
+      -- grout flex . col . text $ "\n" <> bt
 
+      -- et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
+      -- bt <- hold "WHIIII" et
+      -- grout flex . col . text $ bt
+      -- (_, eEventEval :: Event t (Either String (Event t Text)))
+      --   <- runWithReplace (grout flex . col . text $
+      --                      "Write some Telomare code and interact with the generated AST")
+      --                     (sequence . fmap nodeList <$> telomareNodes)
+      -- telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
+      --   telomareTextInput :: TextInput t <- grout flex $ textBox
+      --   pure . updated $ fmap ( fmap (nodify . TE.tagUPTwithIExpr [])
+      --                         . TP.runParseLongExpr
+      --                         . T.unpack
+      --                         )
+      --                         (_textInput_value telomareTextInput)
+      telomareNodes :: Event t (Either String [Node]) <- grout flex . col . pure $ fmap (bimap show (nodify . TE.tagIExprWithEval)) $ eitherIExpr
+      et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
+      bt' <- hold "WHIIII" et
+
+      (_, eEventEval :: Event t (Either String (Event t Text)))
+        <- runWithReplace (grout flex . col . text $
+                            "Write some Telomare code and interact with the generated AST")
+                          (sequence . fmap nodeList <$> telomareNodes)
+      grout flex . col . text $ bt'
     pure ()
   pure $ fmap (\_ -> ()) getout
 
