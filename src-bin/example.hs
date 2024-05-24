@@ -275,7 +275,10 @@ nodeList :: ( VtyExample t m
             )
          => [Node] -> m (Event t Text)
 nodeList nodes0 = col $ do
+  grout (fixed 1) $ text ""
   grout flex $ (fmap snd . fst) <$> nodes nodes0
+
+
 
 -- (\x -> x) 0
 
@@ -388,14 +391,21 @@ evaluare = mainWidget $ initManager_ $ do
       --                         . T.unpack
       --                         )
       --                         (_textInput_value telomareTextInput)
-      telomareNodes :: Event t (Either String [Node]) <- grout flex . col . pure $ fmap (bimap show (nodify . TE.tagIExprWithEval)) $ eitherIExpr
-      et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      bt' <- hold "WHIIII" et
+      -- telomareNodes :: Event t (Either String [Node]) <- grout flex . col . pure $ bimap show (nodify . TE.tagIExprWithEval) <$> eitherIExpr
+      let telomareNodes = bimap show (nodify . TE.tagIExprWithEval) <$> eitherIExpr
+          -- removeLeadingWhiteSpaces = \case
+          -- addBeginningNewLine = \case
+          --   [] -> []
+          --   (x:xs) -> x {_node_label = "\n" <>_node_label x} : xs
+      -- TODO: fix that never
+
 
       (_, eEventEval :: Event t (Either String (Event t Text)))
         <- runWithReplace (grout flex . col . text $
-                            "Write some Telomare code and interact with the generated AST")
+                            "\nWrite some Telomare code and interact with the generated AST")
                           (sequence . fmap nodeList <$> telomareNodes)
+      et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
+      bt' <- hold "\nSelect nodes from the center pane and that'll evaluate here" (("\n" <>) . T.dropWhile (== ' ') <$> et)
       grout flex . col . text $ bt'
     pure ()
   pure $ fmap (\_ -> ()) getout
