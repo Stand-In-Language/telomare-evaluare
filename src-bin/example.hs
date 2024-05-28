@@ -1,38 +1,39 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-import Data.Either (fromRight)
-import Data.Maybe (listToMaybe)
-import Data.Bifunctor (first, bimap)
-import Data.Maybe (fromMaybe)
-import Data.Bool (bool)
-import Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Applicative
+import           Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Concurrent
 import           Control.Monad
 import           Control.Monad.Except
 import           Control.Monad.Fix
 import           Control.Monad.IO.Class
+import           Data.Bifunctor         (bimap, first)
+import           Data.Bool              (bool)
+import           Data.Either            (fromRight)
 import           Data.Functor
 import           Data.Functor.Identity  (Identity)
 import           Data.Functor.Misc
 import           Data.Map               (Map)
 import qualified Data.Map               as Map
+import           Data.Maybe             (fromMaybe, listToMaybe)
 import qualified Data.Set               as Set
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import qualified Data.Text.Zipper       as TZ
 import           Data.Time              (getCurrentTime)
 import           Debug.Trace            (trace, traceShowId)
+import           Example.CPU
 import qualified Graphics.Vty           as V
 import           Reflex
 import           Reflex.Network
 import           Reflex.Vty
-import Telomare (IExpr(..), IExprF (..))
 import qualified Telomare               as Tel
+import           Telomare               (IExpr (..), IExprF (..))
 import qualified Telomare.Eval          as TE
 import qualified Telomare.Parser        as TP
-import Telomare.Parser (UnprocessedParsedTerm(..), UnprocessedParsedTermF(..))
-import           Example.CPU
+import           Telomare.Parser        (UnprocessedParsedTerm (..),
+                                         UnprocessedParsedTermF (..))
+import           Text.Read              (readMaybe)
 
 type VtyExample t m =
   ( MonadFix m
@@ -120,14 +121,14 @@ main = mainWidget $ withCtrlC $ do
             V.EvKey V.KEsc [] -> Just $ Right ()
             _                 -> Nothing
     rec out <- networkHold buttons $ ffor (switch (current out)) $ \case
-          Left Example_Todo -> escapable taskList
-          Left Example_Node -> escapable . nodeList $ nodes0Aux
+          Left Example_Todo                  -> escapable taskList
+          Left Example_Node                  -> escapable . nodeList $ nodes0Aux
           -- Left Example_TextEditor -> escapable $ localTheme (const (constant darkTheme)) testBoxes
-          Left Example_TextEditor -> escapable testBoxes
+          Left Example_TextEditor            -> escapable testBoxes
           Left Example_ScrollableTextDisplay -> escapable scrolling
           Left Example_ClickButtonsGetEmojis -> escapable easyExample
-          Left Example_CPUStat -> escapable cpuStats
-          Right () -> buttons
+          Left Example_CPUStat               -> escapable cpuStats
+          Right ()                           -> buttons
     return ()
 
 -- * Mouse button and emojis example
@@ -196,15 +197,15 @@ nodes0Aux =
   ]
 
 data Node = Node
-  { _node_label  :: Text
-  , _node_eval   :: Text
-  , _node_expand :: Bool
+  { _node_label    :: Text
+  , _node_eval     :: Text
+  , _node_selected :: Bool
   }
   deriving (Show, Eq)
 
 data NodeOutput t = NodeOutput
-  { _nodeOutput_node    :: Dynamic t Node
-  , _nodeOutput_expand  :: Event t Bool
+  { _nodeOutput_node   :: Dynamic t Node
+  , _nodeOutput_expand :: Event t Bool
   }
 
 node :: forall t m. ( VtyExample t m
@@ -215,7 +216,7 @@ node :: forall t m. ( VtyExample t m
      => Node
      -> m (NodeOutput t)
 node n0 = do
-  res <- row $ do
+  row $ do
     (fid, _) <- tile' ( fixed
                       . pure
                       . (+1)
@@ -225,12 +226,12 @@ node n0 = do
                       ) $ do
       grout flex . text . pure . _node_label $ n0
       pure ()
-    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_expand n0
+    value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_selected n0
     pure $ NodeOutput
       { _nodeOutput_node = Node (_node_label n0) (_node_eval n0) <$> value
       , _nodeOutput_expand = updated value
       }
-  pure res
+
 
 nodes :: forall t m.
          ( MonadHold t m
@@ -244,26 +245,30 @@ nodes :: forall t m.
 nodes nodes0 = do
   let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
-    dw <- displayWidth
-    dh <- displayHeight
-    let div' :: (Integral a) => Dynamic t a -> Dynamic t a -> Dynamic t a
-        div' = liftA2 div
-        region1 = Region <$> (div' dw 6) <*> (div' dh 6) <*> (div' dw 2) <*> (div' dh 2)
-    -- pane region1 (constDyn False) . boxStatic singleBoxStyle $ debugEvent expandedIndex
     listOut :: Dynamic t (Map Int (NodeOutput t))
-      <- listHoldWithKey nodeMaps0 eventMapMaybeNodes $ \_ v -> do
-           no <- grout (fixed 1) $ node v
-           pure no
-    eventMapMaybeNodes <- switchHold never $
-          mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
+      <- listHoldWithKey nodeMaps0 updates $ \_ v -> grout (fixed 1) $ node v
     let expandedEvalText :: Event t (Int, Text)
         expandedEvalText = switchDyn $
-          leftmost . Map.elems . Map.mapWithKey (\k -> fmap ((k,) . _node_eval) . updated . _nodeOutput_node) <$> listOut
+            leftmost
+          . Map.elems
+          . Map.mapWithKey (\k -> fmap ((k,) . _node_eval) . updated . _nodeOutput_node)
+          <$> listOut
+        nodesMap :: Dynamic t (Map Int Node)
+        nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
+        updates :: Event t (Map Int (Maybe Node))
+        updates = justOneChecked <@> (fst <$> expandedEvalText)
+        justOneChecked :: Behavior t (Int -> Map Int (Maybe Node))
+        justOneChecked = current $
+          (\n i -> Map.mapWithKey (\k n' -> if k == i
+                                            then Just n' {_node_selected = True}
+                                            else Just n' {_node_selected = False}
+                                  ) n
+          ) <$> nodesMap
   pure (expandedEvalText, listOut)
 
 debugEvent :: (Show a, VtyExample t m, MonadHold t m) => Event t a -> m ()
 debugEvent event = do
-  lastEvent :: Behavior t String <- hold "No event yet" . fmap show =<< (pure (traceEventWith (\e -> "hola1: " <> show e) event))
+  lastEvent :: Behavior t String <- hold "No event yet" . fmap show $ traceEventWith (\e -> "hola1: " <> show e) event
   text $ T.pack <$> lastEvent
 
 nodeList :: ( VtyExample t m
@@ -276,78 +281,81 @@ nodeList :: ( VtyExample t m
          => [Node] -> m (Event t Text)
 nodeList nodes0 = col $ do
   grout (fixed 1) $ text ""
-  grout flex $ (fmap snd . fst) <$> nodes nodes0
+  grout flex $ fmap snd . fst <$> nodes nodes0
 
 
-
+-- [ Node {_node_label = "1", _node_eval = "1\n", _node_selected = False}
+-- , Node {_node_label = "  0", _node_eval = "  0\n", _node_selected = False}
+-- , Node {_node_label = "  0", _node_eval = "  0\n", _node_selected = False}
+-- ]
 -- (\x -> x) 0
+-- [Node {_node_label = "4", _node_eval = "4\n", _node_expand = False}
+--   ,Node {_node_label = "  3", _node_eval = "  3\n", _node_expand = False}
+--   ,Node {_node_label = "    2", _node_eval = "    2\n", _node_expand = False}
+--   ,Node {_node_label = "      1", _node_eval = "      1\n", _node_expand = False}
+--   ,Node {_node_label = "        0", _node_eval = "        0\n", _node_expand = False}
+--   ,Node {_node_label = "        0", _node_eval = "        0\n", _node_expand = False}
+--   ,Node {_node_label = "      0", _node_eval = "      0\n", _node_expand = False}
+--   ,Node {_node_label = "    0", _node_eval = "    0\n", _node_expand = False}
+--   ,Node {_node_label = "  0", _node_eval = "  0\n", _node_expand = False}
+--   ]
 
 nodify :: Cofree IExprF (Int, Either Tel.RunTimeError IExpr) -> [Node]
-nodify = fmap go . allNodes 0
-  where go :: (Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr)) -> Node
-        go (i, x@(anno :< uptf)) = Node ( T.pack
-                                        . (join (replicate i "  ") <>)
-                                        . head
-                                        . lines
-                                        . show
-                                        . Tel.PrettierIExpr
-                                        . Tel.forget
-                                        $ x
-                                        )
-                                        ( T.pack
-                                        . (join (replicate i "  ") <>)
-                                        . flattenEitherStringString
-                                        . bimap show (show . Tel.PrettierIExpr)
-                                        . snd
-                                        $ anno
-                                        )
-                                        False
-        -- TODO: something more elegant
-        allNodes :: Int -- * Indentation
-                 -> Cofree IExprF (Int, Either Tel.RunTimeError IExpr)
-                 -> [(Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr))]
-        allNodes i = \case
-          x@(anno :< ZeroF) -> (i, x) : []
-          x@(anno :< EnvF) -> (i, x) : []
-          x@(anno :< TraceF) -> (i, x) : []
-          x@(anno :< (SetEnvF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (DeferF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (PLeftF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
-          x@(anno :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          x@(anno :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-        flattenEitherStringString :: Either String String -> String
-        flattenEitherStringString = \case
-          Right str -> str
-          Left str  -> str
-          -- x@(anno :< (ITEUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          -- x@(anno :< (ListUPF l)) -> (i, x) : (join $ allNodes (i + 1) <$> l)
-          -- x@(anno :< (LetUPF l a)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          -- x@(anno :< (CaseUPF a l)) -> (i, x) : allNodes (i + 1) a <> (join $ allNodes (i + 1) <$> (snd <$> l))
-          -- x@(anno :< (LamUPF _ a)) -> (i, x) : allNodes (i + 1) a
-          -- x@(anno :< (AppUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          -- x@(anno :< (UnsizedRecursionUPF a b c)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b <> allNodes (i + 1) c
-          -- x@(anno :< (CheckUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-          -- x@(anno :< (LeftUPF a)) -> (i, x) : allNodes (i + 1) a
-          -- x@(anno :< (RightUPF a)) -> (i, x) : allNodes (i + 1) a
-          -- x@(anno :< (TraceUPF a)) -> (i, x) : allNodes (i + 1) a
-          -- x@(anno :< (HashUPF a)) -> (i, x) : allNodes (i + 1) a
-          -- x@(anno :< (IntUPF _)) -> (i, x) : []
-          -- x@(anno :< (VarUPF _)) -> (i, x) : []
-          -- x@(anno :< (PairUPF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+nodify = removeExtraNumbers . fmap go . allNodes 0 where
+  removeExtraNumbers :: [Node] -> [Node]
+  removeExtraNumbers = \case
+    [] -> []
+    (x:xs) -> case (readMaybe . T.unpack . _node_eval $ x) :: Maybe Int of
+                Nothing -> x : removeExtraNumbers xs
+                Just i  -> x : removeExtraNumbers (drop (2 * i) xs)
+
+  go :: (Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr)) -> Node
+  go (i, x@(anno :< uptf)) =
+    Node ( T.pack
+         . (join (replicate i "  ") <>)
+         . head
+         . lines
+         . show
+         . Tel.PrettierIExpr
+         . Tel.forget
+         $ x
+         )
+         ( T.pack
+         . (join (replicate i "  ") <>)
+         . flattenEitherStringString
+         . bimap show (show . Tel.PrettierIExpr)
+         . snd
+         $ anno
+         )
+         False
+  allNodes :: Int -- * Indentation
+           -> Cofree IExprF (Int, Either Tel.RunTimeError IExpr)
+           -> [(Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr))]
+  allNodes i = \case
+    x@(anno :< ZeroF) -> (i, x) : []
+    x@(anno :< EnvF) -> (i, x) : []
+    x@(anno :< TraceF) -> (i, x) : []
+    x@(anno :< (SetEnvF a)) -> (i, x) : allNodes (i + 1) a
+    x@(anno :< (DeferF a)) -> (i, x) : allNodes (i + 1) a
+    x@(anno :< (PLeftF a)) -> (i, x) : allNodes (i + 1) a
+    x@(anno :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
+    x@(anno :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+    x@(anno :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+  flattenEitherStringString :: Either String String -> String
+  flattenEitherStringString = \case
+    Right str -> str
+    Left str  -> str
 
 evaluare :: IO ()
 evaluare = mainWidget $ initManager_ $ do
   let cfg = def
         { _textInputConfig_initialValue = TZ.fromText . T.pack . unlines $
             [ "-- Example:"
-            , "(\\x -> 0) "
+            , "(\\x -> 0) 8"
             ]
         }
-      -- textBox :: Layout t (Focus t m) a
       textBox = boxTitle (pure roundedBoxStyle) "Telomare" $
         multilineTextInput cfg
-      -- btn :: Text -> m (Event t ())
       btn label = do
         let cfg' = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
         buttonClick <- textButtonStatic cfg' label
@@ -355,60 +363,31 @@ evaluare = mainWidget $ initManager_ $ do
           [ (V.KEnter, [])
           , (V.KChar ' ', [])
           ]
-        pure $ leftmost [() <$ buttonClick, () <$ keyPress]
+        pure $ leftmost [void buttonClick, void keyPress]
       escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
       escOrCtrlcQuit = do
         inp <- input
         pure $ fforMaybe inp $ \case
           V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-          V.EvKey (V.KEsc) []             -> Just ()
+          V.EvKey V.KEsc []               -> Just ()
           _                               -> Nothing
   getout <- escOrCtrlcQuit
   tile flex $ box (pure roundedBoxStyle) $ row $ do
     rec
       eitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
-        telomareTextInput :: TextInput t <- grout flex $ textBox
+        telomareTextInput :: TextInput t <- grout flex textBox
         pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
-      -- let flattenHomogenousEither :: Either a a -> a
-      --     flattenHomogenousEither = \case
-      --       Right x -> x
-      --       Left x  -> x
-      -- bt <- hold "( D\n    0\n, 0\n)" $ T.pack . flattenHomogenousEither . fmap (show . Tel.PrettierIExpr) <$> eitherIExpr
       grout (fixed 2) . col . text $ ""
-      -- grout flex . col . text $ "\n" <> bt
-
-      -- et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      -- bt <- hold "WHIIII" et
-      -- grout flex . col . text $ bt
-      -- (_, eEventEval :: Event t (Either String (Event t Text)))
-      --   <- runWithReplace (grout flex . col . text $
-      --                      "Write some Telomare code and interact with the generated AST")
-      --                     (sequence . fmap nodeList <$> telomareNodes)
-      -- telomareNodes :: Event t (Either String [Node]) <- grout flex $ col $ do
-      --   telomareTextInput :: TextInput t <- grout flex $ textBox
-      --   pure . updated $ fmap ( fmap (nodify . TE.tagUPTwithIExpr [])
-      --                         . TP.runParseLongExpr
-      --                         . T.unpack
-      --                         )
-      --                         (_textInput_value telomareTextInput)
-      -- telomareNodes :: Event t (Either String [Node]) <- grout flex . col . pure $ bimap show (nodify . TE.tagIExprWithEval) <$> eitherIExpr
       let telomareNodes = bimap show (nodify . TE.tagIExprWithEval) <$> eitherIExpr
-          -- removeLeadingWhiteSpaces = \case
-          -- addBeginningNewLine = \case
-          --   [] -> []
-          --   (x:xs) -> x {_node_label = "\n" <>_node_label x} : xs
-      -- TODO: fix that never
-
-
       (_, eEventEval :: Event t (Either String (Event t Text)))
         <- runWithReplace (grout flex . col . text $
                             "\nWrite some Telomare code and interact with the generated AST")
-                          (sequence . fmap nodeList <$> telomareNodes)
+                          (mapM nodeList <$> telomareNodes)
       et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      bt' <- hold "\nSelect nodes from the center pane and that'll evaluate here" (("\n" <>) . T.dropWhile (== ' ') <$> et)
-      grout flex . col . text $ bt'
+      bt <- hold "\nSelect nodes from the center pane and that'll evaluate here" (("\n" <>) . T.dropWhile (== ' ') <$> et)
+      grout flex . col . text $ bt
     pure ()
-  pure $ fmap (\_ -> ()) getout
+  pure $ fmap (const ()) getout
 
 data Todo = Todo
   { _todo_label :: Text
@@ -452,6 +431,8 @@ todos todos0 newTodo = do
           insert = ffor (tag (current todosMap) newTodo) $ \m -> case Map.lookupMax m of
              Nothing     -> Map.singleton 0 $ Just $ Todo "" False
              Just (k, _) -> Map.singleton (k+1) $ Just $ Todo "" False
+          -- eventMapMaybeNodes <- switchHold never $
+          --       mergeMap . fmap (fmap Just . updated . _nodeOutput_node) <$> (updated listOut)
           updates :: Event t (Map Int (Maybe Todo))
           updates = leftmost [insert, delete]
           todoDelete :: Event t Int
