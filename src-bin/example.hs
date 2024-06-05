@@ -283,23 +283,6 @@ nodeList nodes0 = col $ do
   grout (fixed 1) $ text ""
   grout flex $ fmap snd . fst <$> nodes nodes0
 
-
--- [ Node {_node_label = "1", _node_eval = "1\n", _node_selected = False}
--- , Node {_node_label = "  0", _node_eval = "  0\n", _node_selected = False}
--- , Node {_node_label = "  0", _node_eval = "  0\n", _node_selected = False}
--- ]
--- (\x -> x) 0
--- [Node {_node_label = "4", _node_eval = "4\n", _node_expand = False}
---   ,Node {_node_label = "  3", _node_eval = "  3\n", _node_expand = False}
---   ,Node {_node_label = "    2", _node_eval = "    2\n", _node_expand = False}
---   ,Node {_node_label = "      1", _node_eval = "      1\n", _node_expand = False}
---   ,Node {_node_label = "        0", _node_eval = "        0\n", _node_expand = False}
---   ,Node {_node_label = "        0", _node_eval = "        0\n", _node_expand = False}
---   ,Node {_node_label = "      0", _node_eval = "      0\n", _node_expand = False}
---   ,Node {_node_label = "    0", _node_eval = "    0\n", _node_expand = False}
---   ,Node {_node_label = "  0", _node_eval = "  0\n", _node_expand = False}
---   ]
-
 nodify :: Cofree IExprF (Int, Either Tel.RunTimeError IExpr) -> [Node]
 nodify = removeExtraNumbers . fmap go . allNodes 0 where
   removeExtraNumbers :: [Node] -> [Node]
@@ -308,7 +291,6 @@ nodify = removeExtraNumbers . fmap go . allNodes 0 where
     (x:xs) -> case (readMaybe . T.unpack . _node_eval $ x) :: Maybe Int of
                 Nothing -> x : removeExtraNumbers xs
                 Just i  -> x : removeExtraNumbers (drop (2 * i) xs)
-
   go :: (Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr)) -> Node
   go (i, x@(anno :< uptf)) =
     Node ( T.pack

@@ -49,15 +49,19 @@
       in {
         packages.reflex-vty = project false "reflex-vty" [ ]; # [3]
         packages.default = self.packages.${system}.reflex-vty;
-
-        devShells.default = project true "reflex-vty-with-tools" (with compiler; [ # [4]
-          cabal-install
-          haskell-language-server
-          hlint
-          ghcid
-          stylish-haskell
-        ]);
-
+        devShells.default = pkgs.mkShell {
+          name = "shell-ghc945";
+          buildInputs = with pkgs; [
+            cabal-install
+            ghcid
+            haskell-language-server
+            hlint
+            stylish-haskell
+          ];
+          inputsFrom = [
+            (import ./release.nix { inherit pkgs system; }).${system}.ghc945.env
+          ];
+        };
         checks = {
           build-and-tests = project true "telomare-with-tests" [ ];
         };

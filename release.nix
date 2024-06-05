@@ -1,9 +1,11 @@
 { reflex-platform ? import ./dep/reflex-platform
 , supportedSystems ? [ "x86_64-linux" "x86_64-darwin" ]
+, pkgs
+, system
 }:
 let
-  rp = reflex-platform {};
-  pkgs = rp.nixpkgs;
+  rp = reflex-platform { inherit system; };
+  # pkgs = rp.nixpkgs;
   inherit (pkgs) lib;
   haskellLib = pkgs.haskell.lib;
   commonOverrides = self: super: {
