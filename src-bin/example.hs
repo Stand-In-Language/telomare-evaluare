@@ -1,27 +1,22 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import qualified Control.Exception as Exception
 import           Control.Applicative
 import           Control.Comonad.Cofree (Cofree ((:<)))
 import           Control.Concurrent
 import           Control.Monad
 import           Control.Monad.Except
-import           Control.Monad.Fix
-import           Control.Monad.IO.Class
-import           Data.Bifunctor         (bimap, first)
-import           Data.Bool              (bool)
-import           Data.Either            (fromRight, fromLeft)
-import           Data.Functor
-import           Data.Functor.Identity  (Identity)
+import           Data.Bifunctor         (bimap)
+import           Data.Either            (fromLeft)
+import Data.Functor ( ($>) )
 import           Data.Functor.Misc
 import           Data.Map               (Map)
 import qualified Data.Map               as Map
-import           Data.Maybe             (fromMaybe, listToMaybe)
 import qualified Data.Set               as Set
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import qualified Data.Text.Zipper       as TZ
 import           Data.Time              (getCurrentTime)
-import           Debug.Trace            (trace, traceShowId)
 import           Example.CPU
 import qualified Graphics.Vty           as V
 import           Reflex
@@ -30,9 +25,6 @@ import           Reflex.Vty
 import qualified Telomare               as Tel
 import           Telomare               (IExpr (..), IExprF (..))
 import qualified Telomare.Eval          as TE
-import qualified Telomare.Parser        as TP
-import           Telomare.Parser        (UnprocessedParsedTerm (..),
-                                         UnprocessedParsedTermF (..))
 import           Text.Read              (readMaybe)
 
 type VtyExample t m =
@@ -170,26 +162,6 @@ easyExample = do
       pure $ leftmost [() <$ buttonClick, () <$ keyPress]
 
 -- * Task list example
-taskList
-  :: ( VtyExample t m
-     , Manager t m
-     , MonadHold t m
-     , Adjustable t m
-     , PostBuild t m
-     )
-  => m ()
-taskList = col $ do
-  let todos0 =
-        [ Todo "Find reflex-vty" True
-        , Todo "Become functional reactive" False
-        , Todo "Make vty apps" False
-        ]
-      btn = textButtonStatic def "Add another task"
-  enter <- fmap (const ()) <$> key V.KEnter
-  rec grout flex . todos todos0 $ enter <> click
-      click <- tile (fixed 3) btn
-  pure ()
-
 nodes0Aux =
   [ Node "PairUP" "IExpr Foo" False
   , Node "  IntUP 0" "IExpr Bar" True
@@ -217,13 +189,7 @@ node :: forall t m. ( VtyExample t m
      -> m (NodeOutput t)
 node n0 = do
   row $ do
-    (fid, _) <- tile' ( fixed
-                      . pure
-                      . (+1)
-                      . T.length
-                      . _node_label
-                      $ n0
-                      ) $ do
+    tile ( fixed . pure . (+1) . T.length . _node_label $ n0) $ do
       grout flex . text . pure . _node_label $ n0
       pure ()
     value :: Dynamic t Bool <- tile (fixed 4) $ checkbox def $ _node_selected n0
@@ -315,68 +281,91 @@ nodify = removeExtraNumbers . fmap go . allNodes 0 where
            -> Cofree IExprF (Int, Either Tel.RunTimeError IExpr)
            -> [(Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr))]
   allNodes i = \case
-    x@(anno :< ZeroF) -> (i, x) : []
-    x@(anno :< EnvF) -> (i, x) : []
-    x@(anno :< TraceF) -> (i, x) : []
-    x@(anno :< (SetEnvF a)) -> (i, x) : allNodes (i + 1) a
-    x@(anno :< (DeferF a)) -> (i, x) : allNodes (i + 1) a
-    x@(anno :< (PLeftF a)) -> (i, x) : allNodes (i + 1) a
-    x@(anno :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
-    x@(anno :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-    x@(anno :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+    x@(_ :< ZeroF) -> (i, x) : []
+    x@(_ :< EnvF) -> (i, x) : []
+    x@(_ :< TraceF) -> (i, x) : []
+    x@(_ :< (SetEnvF a)) -> (i, x) : allNodes (i + 1) a
+    x@(_ :< (DeferF a)) -> (i, x) : allNodes (i + 1) a
+    x@(_ :< (PLeftF a)) -> (i, x) : allNodes (i + 1) a
+    x@(_ :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
+    x@(_ :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
+    x@(_ :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
   forgetEither :: Either a a -> a
   forgetEither = \case
     Right x -> x
     Left x  -> x
 
 evaluare :: IO ()
-evaluare = mainWidget $ initManager_ $ do
-  let cfg = def
-        { _textInputConfig_initialValue = TZ.fromText . T.pack . unlines $
-            [ "-- Example:"
-            , "(\\x -> 0) 8"
-            ]
-        }
-      textBox = boxTitle (pure roundedBoxStyle) "Telomare" $
-        multilineTextInput cfg
-      btn label = do
-        let cfg' = def { _buttonConfig_focusStyle = pure doubleBoxStyle }
-        buttonClick <- textButtonStatic cfg' label
-        keyPress <- keyCombos $ Set.fromList
-          [ (V.KEnter, [])
-          , (V.KChar ' ', [])
-          ]
-        pure $ leftmost [void buttonClick, void keyPress]
-      escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
-      escOrCtrlcQuit = do
-        inp <- input
-        pure $ fforMaybe inp $ \case
-          V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-          V.EvKey V.KEsc []               -> Just ()
-          _                               -> Nothing
-  getout <- escOrCtrlcQuit
-  tile flex . box (pure roundedBoxStyle) . row $ do
-    rec
-      eEitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
-        telomareTextInput :: TextInput t <- grout flex textBox
-        pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
-      grout (fixed 2) . col . text $ ""
-      let telomareNodes = fmap (nodify . TE.tagIExprWithEval) <$> eEitherIExpr
-          fromRightWith :: (a -> b) -> Either a b -> b
-          fromRightWith f = \case
-            Left x -> f x
-            Right x -> x
-      (_, eEventEval :: Event t (Either String (Event t Text)))
-        <- runWithReplace (grout flex . col . text $
-                            "\nWrite some Telomare code and interact with the generated AST")
-                          (mapM nodeList <$> telomareNodes)
-      -- et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      et :: Event t Text <- switchHold (T.pack . fromLeft "woooooot99" <$> eEitherIExpr)
-                                       (fromRightWith (\str -> (T.pack str) <$ telomareNodes) <$> eEventEval)
-      bt <- hold "\nSelect nodes from the center pane and that'll evaluate here" $ ("\n" <>) . T.dropWhile (== ' ') <$> et
-      grout flex . col . text $ bt
-    pure ()
-  pure $ void getout
+evaluare = do
+  let go textErr =
+        mainWidget $ initManager_ $ do
+          let cfg = def
+                { _textInputConfig_initialValue = TZ.fromText . T.pack . unlines $
+                    [ "-- Example:"
+                    , "(\\x -> 0) 8"
+                    ]
+                }
+              textBox = boxTitle (pure roundedBoxStyle) "Telomare" $
+                multilineTextInput cfg
+              escOrCtrlcQuit :: (Monad m, HasInput t m, Reflex t) => m (Event t ())
+              escOrCtrlcQuit = do
+                inp <- input
+                pure $ fforMaybe inp $ \case
+                  V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
+                  V.EvKey V.KEsc []               -> Just ()
+                  _                               -> Nothing
+          getout <- escOrCtrlcQuit
+          tile flex . box (pure roundedBoxStyle) . row $ do
+            rec
+              eEitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
+                telomareTextInput :: TextInput t <- grout flex textBox
+                -- TODO: Add Prelude.tel
+                pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
+              grout (fixed 2) . col . text $ ""
+              let telomareNodes = fmap (nodify . TE.tagIExprWithEval) <$> eEitherIExpr
+                  fromRightWith :: (a -> b) -> Either a b -> b
+                  fromRightWith f = \case
+                    Left x -> f x
+                    Right x -> x
+              (_, eEventEval :: Event t (Either String (Event t Text)))
+                <- runWithReplace (grout flex . col . text $
+                                    (if T.length textErr > 0
+                                    then constant ("\nOops, something whent wrong:\n\n" <> textErr <> "\n")
+                                    else "")
+                                      <>
+                                    "\nWrite some Telomare code and interact with the generated AST")
+                                  (mapM nodeList <$> telomareNodes)
+              -- et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
+              et :: Event t Text <- switchHold (T.pack . fromLeft "woooooot99" <$> eEitherIExpr)
+                                               (fromRightWith (\str -> T.pack str <$ telomareNodes) <$> eEventEval)
+              bt <- hold "\nSelect nodes from the center pane and that'll evaluate here" $ ("\n" <>) . T.dropWhile (== ' ') <$> et
+              grout flex . col . text $ bt
+            pure ()
+          pure $ void getout
+  res :: Either Exception.SomeException () <- Exception.try $ go ""
+  case res of
+    Left err -> go . T.pack . show $ err
+    Right _  -> pure ()
+
+taskList
+  :: ( VtyExample t m
+     , Manager t m
+     , MonadHold t m
+     , Adjustable t m
+     , PostBuild t m
+     )
+  => m ()
+taskList = col $ do
+  let todos0 =
+        [ Todo "Find reflex-vty" True
+        , Todo "Become functional reactive" False
+        , Todo "Make vty apps" False
+        ]
+      btn = textButtonStatic def "Add another task"
+  enter <- fmap (const ()) <$> key V.KEnter
+  rec grout flex . todos todos0 $ enter <> click
+      click <- tile (fixed 3) btn
+  pure ()
 
 data Todo = Todo
   { _todo_label :: Text
