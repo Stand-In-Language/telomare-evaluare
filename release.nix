@@ -103,7 +103,16 @@ let
   {
     recurseForDerivations = true;
     ghc810 = rpGhc.callCabal2nix "reflex-vty" (import ./src.nix) {};
-    ghc945 = nixGhc945.callCabal2nix "reflex-vty" (import ./src.nix) {};
+    ghc945 = {
+      nixGhc = nixGhc945.callCabal2nix "reflex-vty" (import ./src.nix) {};
+      forShell = with nixGhc945; [
+        cabal-install
+        # ghcid
+        haskell-language-server
+        hlint
+        stylish-haskell
+      ];
+    };
     ghc961 = nixGhc961.callCabal2nix "reflex-vty" (import ./src.nix) {};
   });
   in

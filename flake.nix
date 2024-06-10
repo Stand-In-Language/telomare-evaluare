@@ -14,57 +14,58 @@
       imports = [];
       perSystem = { self', system, ... }:
       let pkgs = import nixpkgs { inherit system; };
-          t = pkgs.lib.trivial;
-          hl = pkgs.haskell.lib;
-          compiler = pkgs.haskell.packages."ghc94";
-          project = runTests: executable-name: devTools: # [1]
-            let addBuildTools = (t.flip hl.addBuildTools) devTools;
-                addBuildDepends = (t.flip hl.addBuildDepends)
-                  [  ];
-                doRunTests =
-                  if runTests then hl.doCheck else hl.dontCheck;
-            in compiler.developPackage {
-              root = pkgs.lib.sourceFilesBySuffices ./.
-                       [ ".cabal"
-                         ".hs"
-                         ".tel"
-                         "cases"
-                         "LICENSE"
-                       ];
-              name = executable-name;
-              source-overrides = {
-                vty-crossplatform = dep/vty-crossplatform;
-                telomare = dep/stand-in-language;
-              };
-              returnShellEnv = !(devTools == [ ]); # [2]
+          # t = pkgs.lib.trivial;
+          # hl = pkgs.haskell.lib;
+          # compiler = pkgs.haskell.packages."ghc94";
+          # project = runTests: executable-name: devTools: # [1]
+          #   let addBuildTools = (t.flip hl.addBuildTools) devTools;
+          #       addBuildDepends = (t.flip hl.addBuildDepends)
+          #         [  ];
+          #       doRunTests =
+          #         if runTests then hl.doCheck else hl.dontCheck;
+          #   in compiler.developPackage {
+          #     root = pkgs.lib.sourceFilesBySuffices ./.
+          #              [ ".cabal"
+          #                ".hs"
+          #                ".tel"
+          #                "cases"
+          #                "LICENSE"
+          #              ];
+          #     name = executable-name;
+          #     source-overrides = {
+          #       vty-crossplatform = dep/vty-crossplatform;
+          #       telomare = dep/stand-in-language;
+          #     };
+          #     returnShellEnv = !(devTools == [ ]); # [2]
 
-              modifier = (t.flip t.pipe) [
-                addBuildDepends
-                addBuildTools
-                doRunTests
-                # hl.dontHaddock
-              ];
-            };
-
+          #     modifier = (t.flip t.pipe) [
+          #       addBuildDepends
+          #       addBuildTools
+          #       doRunTests
+          #       # hl.dontHaddock
+          #     ];
+          #   };
+          release = (import ./release.nix { inherit pkgs system; }).${system}.ghc945;
       in {
-        packages.reflex-vty = project false "reflex-vty" [ ]; # [3]
-        packages.default = self.packages.${system}.reflex-vty;
+        # packages.reflex-vty = project false "reflex-vty" [ ]; # [3]
+        # packages.default = self.packages.${system}.reflex-vty;
         devShells.default = pkgs.mkShell {
           name = "shell-ghc945";
-          buildInputs = with pkgs; [
-            cabal-install
-            ghcid
-            haskell-language-server
-            hlint
-            stylish-haskell
-          ];
+          # buildInputs = with pkgs; [
+          #   cabal-install
+          #   ghcid
+          #   haskell-language-server
+          #   hlint
+          #   stylish-haskell
+          # ];
+          buildInputs = release.forShell;
           inputsFrom = [
-            (import ./release.nix { inherit pkgs system; }).${system}.ghc945.env
+            release.nixGhc.env
           ];
         };
-        checks = {
-          build-and-tests = project true "telomare-with-tests" [ ];
-        };
+        # checks = {
+        #   build-and-tests = project true "telomare-with-tests" [ ];
+        # };
       };
     };
 }
