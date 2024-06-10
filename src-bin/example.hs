@@ -9,7 +9,7 @@ import           Control.Monad.Fix
 import           Control.Monad.IO.Class
 import           Data.Bifunctor         (bimap, first)
 import           Data.Bool              (bool)
-import           Data.Either            (fromRight)
+import           Data.Either            (fromRight, fromLeft)
 import           Data.Functor
 import           Data.Functor.Identity  (Identity)
 import           Data.Functor.Misc
@@ -232,7 +232,6 @@ node n0 = do
       , _nodeOutput_expand = updated value
       }
 
-
 nodes :: forall t m.
          ( MonadHold t m
          , Manager t m
@@ -241,7 +240,7 @@ nodes :: forall t m.
          , PostBuild t m
          )
       => [Node]
-      -> m (Event t (Int, Text), Dynamic t (Map Int (NodeOutput t)))
+      -> m (Event t Text)
 nodes nodes0 = do
   let nodeMaps0 = Map.fromList $ zip [0..] nodes0
   rec
@@ -251,7 +250,9 @@ nodes nodes0 = do
         expandedEvalText = switchDyn $
             leftmost
           . Map.elems
-          . Map.mapWithKey (\k -> fmap ((k,) . _node_eval) . updated . _nodeOutput_node)
+          . Map.mapWithKey (\k -> fmap ((k,) . _node_eval)
+                                . updated
+                                . _nodeOutput_node)
           <$> listOut
         nodesMap :: Dynamic t (Map Int Node)
         nodesMap = joinDynThroughMap $ fmap _nodeOutput_node <$> listOut
@@ -261,10 +262,10 @@ nodes nodes0 = do
         justOneChecked = current $
           (\n i -> Map.mapWithKey (\k n' -> if k == i
                                             then Just n' {_node_selected = True}
-                                            else Just n' {_node_selected = False}
-                                  ) n
+                                            else Just n' {_node_selected = False})
+                                  n
           ) <$> nodesMap
-  pure (expandedEvalText, listOut)
+  pure $ snd <$> expandedEvalText
 
 debugEvent :: (Show a, VtyExample t m, MonadHold t m) => Event t a -> m ()
 debugEvent event = do
@@ -281,18 +282,18 @@ nodeList :: ( VtyExample t m
          => [Node] -> m (Event t Text)
 nodeList nodes0 = col $ do
   grout (fixed 1) $ text ""
-  grout flex $ fmap snd . fst <$> nodes nodes0
+  grout flex $ nodes nodes0
 
 nodify :: Cofree IExprF (Int, Either Tel.RunTimeError IExpr) -> [Node]
 nodify = removeExtraNumbers . fmap go . allNodes 0 where
   removeExtraNumbers :: [Node] -> [Node]
   removeExtraNumbers = \case
     [] -> []
-    (x:xs) -> case (readMaybe . T.unpack . _node_eval $ x) :: Maybe Int of
+    (x:xs) -> case (readMaybe . T.unpack . _node_label $ x) :: Maybe Int of
                 Nothing -> x : removeExtraNumbers xs
                 Just i  -> x : removeExtraNumbers (drop (2 * i) xs)
   go :: (Int, Cofree IExprF (Int, Either Tel.RunTimeError IExpr)) -> Node
-  go (i, x@(anno :< uptf)) =
+  go (i, x@(anno :< _)) =
     Node ( T.pack
          . (join (replicate i "  ") <>)
          . head
@@ -304,7 +305,7 @@ nodify = removeExtraNumbers . fmap go . allNodes 0 where
          )
          ( T.pack
          . (join (replicate i "  ") <>)
-         . flattenEitherStringString
+         . forgetEither
          . bimap show (show . Tel.PrettierIExpr)
          . snd
          $ anno
@@ -323,10 +324,10 @@ nodify = removeExtraNumbers . fmap go . allNodes 0 where
     x@(anno :< (PRightF a)) -> (i, x) : allNodes (i + 1) a
     x@(anno :< (PairF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
     x@(anno :< (GateF a b)) -> (i, x) : allNodes (i + 1) a <> allNodes (i + 1) b
-  flattenEitherStringString :: Either String String -> String
-  flattenEitherStringString = \case
-    Right str -> str
-    Left str  -> str
+  forgetEither :: Either a a -> a
+  forgetEither = \case
+    Right x -> x
+    Left x  -> x
 
 evaluare :: IO ()
 evaluare = mainWidget $ initManager_ $ do
@@ -354,22 +355,28 @@ evaluare = mainWidget $ initManager_ $ do
           V.EvKey V.KEsc []               -> Just ()
           _                               -> Nothing
   getout <- escOrCtrlcQuit
-  tile flex $ box (pure roundedBoxStyle) $ row $ do
+  tile flex . box (pure roundedBoxStyle) . row $ do
     rec
-      eitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
+      eEitherIExpr :: Event t (Either String IExpr) <- grout flex $ col $ do
         telomareTextInput :: TextInput t <- grout flex textBox
         pure . updated $ TE.eval2IExpr [] . T.unpack <$> _textInput_value telomareTextInput
       grout (fixed 2) . col . text $ ""
-      let telomareNodes = bimap show (nodify . TE.tagIExprWithEval) <$> eitherIExpr
+      let telomareNodes = fmap (nodify . TE.tagIExprWithEval) <$> eEitherIExpr
+          fromRightWith :: (a -> b) -> Either a b -> b
+          fromRightWith f = \case
+            Left x -> f x
+            Right x -> x
       (_, eEventEval :: Event t (Either String (Event t Text)))
         <- runWithReplace (grout flex . col . text $
                             "\nWrite some Telomare code and interact with the generated AST")
                           (mapM nodeList <$> telomareNodes)
-      et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
-      bt <- hold "\nSelect nodes from the center pane and that'll evaluate here" (("\n" <>) . T.dropWhile (== ' ') <$> et)
+      -- et :: Event t Text <- switchHold never (fromRight never <$> eEventEval)
+      et :: Event t Text <- switchHold (T.pack . fromLeft "woooooot99" <$> eEitherIExpr)
+                                       (fromRightWith (\str -> (T.pack str) <$ telomareNodes) <$> eEventEval)
+      bt <- hold "\nSelect nodes from the center pane and that'll evaluate here" $ ("\n" <>) . T.dropWhile (== ' ') <$> et
       grout flex . col . text $ bt
     pure ()
-  pure $ fmap (const ()) getout
+  pure $ void getout
 
 data Todo = Todo
   { _todo_label :: Text
